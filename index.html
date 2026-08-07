@@ -1145,7 +1145,7 @@ function recalc() {
   const C1='#f5c518',C2='#1e3a8a',C3='#7ec8e3',C4='#fff',C5='#27b3e7',C_POOL_NEW='#9bd5f5',C_PROMISED='#8e6bbf';
 
   // store for export
-  lastCalc={pps,newRoundShares,ourShares,otherShares,wireAmt,dividendRate,postMoney,postFD,preFDTotal,preFDBase,sharesO,poolIncrease,safeResults,totalSAFEShares,postReserved,preReserved,preMoney,roundSize,ourInvest,effectiveOurInvest};
+  lastCalc={pps,newRoundShares,ourShares,otherShares,wireAmt,dividendRate,postMoney,postFD,preFDTotal,preFDBase,sharesO,pa,promisedOpts,poolIncrease,safeResults,totalSAFEShares,postReserved,preReserved,preMoney,roundSize,ourInvest,effectiveOurInvest};
 
   // ── BUILD HTML ────────────────────────────────────────────────────────────
   let h='';
@@ -1855,8 +1855,7 @@ function doPrint() {
 function exportExcel() {
   if (!lastCalc) { alert('Run a calculation first.'); return; }
   if (typeof XLSX === 'undefined') { alert('SheetJS not loaded — check internet connection.'); return; }
-  const {pps,newRoundShares,ourShares,otherShares,wireAmt,dividendRate,postMoney,postFD,preFDTotal,preFDBase,sharesO,poolIncrease,safeResults,postReserved,preReserved,preMoney,roundSize,ourInvest} = lastCalc;
-  const _sharesO = sharesO ?? (preFDBase - (preReserved||0));
+  const {pps,newRoundShares,ourShares,otherShares,wireAmt,dividendRate,postMoney,postFD,preFDTotal,preFDBase,sharesO,pa,promisedOpts,poolIncrease,safeResults,totalSAFEShares,preMoney,roundSize,ourInvest} = lastCalc;
   const divPct = (parseFloat(document.getElementById('dividendRatePct')?.value) || 6) / 100;
 
   const wb = XLSX.utils.book_new();
@@ -1880,21 +1879,21 @@ function exportExcel() {
   ws1['A2']={v:'INPUTS',t:'s'};
   ws1['D2']={v:'CALCULATED',t:'s'};
 
-  // Input cells (col B, rows 3-10)
+  // Input cells (col B, rows 3-9)
   ws1['A3']={v:valuationMode==='post'?'Post-Money Valuation':'Pre-Money Valuation',t:'s'};
   ws1['B3']={v:pf('preMoney'),t:'n',z:'$#,##0'};
   ws1['A4']={v:'Round Size (Total)',t:'s'};
   ws1['B4']={v:roundSize,t:'n',z:'$#,##0'};
   ws1['A5']={v:'Our Investment',t:'s'};
   ws1['B5']={v:ourInvest,t:'n',z:'$#,##0'};
-  ws1['A6']={v:'Pre-Money FD Shares',t:'s'};
-  ws1['B6']={v:_sharesO,t:'n',z:'#,##0'};
-  ws1['A7']={v:'Stock Plan Increase',t:'s'};
-  ws1['B7']={v:poolIncrease,t:'n',z:'#,##0'};
-  if(preReserved>0){
-    ws1['A8']={v:'Pre-$ Pool Reserved',t:'s'};
-    ws1['B8']={v:preReserved,t:'n',z:'#,##0'};
-  }
+  ws1['A6']={v:'Pre-Money FD Shares (excl. stock plan)',t:'s'};
+  ws1['B6']={v:sharesO,t:'n',z:'#,##0'};
+  ws1['A7']={v:'Total Stock Plan',t:'s'};
+  ws1['B7']={v:pa,t:'n',z:'#,##0'};
+  ws1['A8']={v:'Stock Plan Increase',t:'s'};
+  ws1['B8']={v:poolIncrease,t:'n',z:'#,##0'};
+  ws1['A9']={v:'Total SAFE Shares (static — see Pro Forma tab)',t:'s'};
+  ws1['B9']={v:totalSAFEShares,t:'n',z:'#,##0'};
 
   // Formula cells (col D+E, rows 3-12)
   // Pre-money derived from mode
@@ -1905,17 +1904,17 @@ function exportExcel() {
   ws1['D4']={v:'Post-Money',t:'s'};
   setF(ws1,'E4',postMoney,'=E3+B4','$#,##0');
 
-  ws1['D5']={v:'Pre-$ FD (incl. new pool)',t:'s'};
-  setF(ws1,'E5',preFDTotal,'=B6+B7','#,##0');
+  ws1['D5']={v:'Pre-$ FD (excl. SAFEs)',t:'s'};
+  setF(ws1,'E5',preFDTotal,'=B6+B7+B8','#,##0');
 
   ws1['D6']={v:'Price Per Share (PPS)',t:'s'};
-  setF(ws1,'E6',pps,`=ROUND(E3/E5,${ppsDec})`,'"$"0.0000');
+  setF(ws1,'E6',pps,`=ROUND(E3/(E5+B9),${ppsDec})`,'"$"0.0000');
 
   ws1['D7']={v:'Aggregate New Shares',t:'s'};
   setF(ws1,'E7',newRoundShares,'=ROUNDDOWN(B4/E6,0)','#,##0');
 
   ws1['D8']={v:'Post-$ FD Shares',t:'s'};
-  setF(ws1,'E8',postFD,'=E5+E7','#,##0');
+  setF(ws1,'E8',postFD,'=E5+B9+E7','#,##0');
 
   if(ourInvest>0){
     ws1['D9']={v:'Our Shares',t:'s'};
@@ -1929,15 +1928,17 @@ function exportExcel() {
   XLSX.utils.book_append_sheet(wb,ws1,'Inputs & Formulas');
 
   // ── Sheet 2: Pro Forma Cap Table (with formulas referencing Sheet 1) ──────
+  // Each row carries EXPLICIT pre/post share counts — SAFEs, the pool increase, and new money
+  // don't exist "pre-round," so their Pre Shares is 0, not a repeat of their Post Shares.
   const ref=(cell)=>`'Inputs & Formulas'!${cell}`;
   const capRows=[
-    ['Existing Holders', _sharesO, `=${ref('B6')}`, _sharesO/postFD, `=${ref('B6')}/${ref('E8')}`],
-    ...(poolIncrease>0?[['Stock Plan (New)', poolIncrease, `=${ref('B7')}`, poolIncrease/postFD, `=${ref('B7')}/${ref('E8')}`]]:[]),
-    ...safeResults.map(sr=>[sr.name||'SAFE investor', sr.safeShares, sr.safeShares, sr.safeShares/postFD, sr.safeShares/postFD]),
+    {name:'Existing Holders', preS:sharesO, preF:`=${ref('B6')}`, postS:sharesO, postF:`=${ref('B6')}`},
+    ...((pa>0||poolIncrease>0)?[{name:'Total Stock Plan', preS:pa, preF:`=${ref('B7')}`, postS:pa+poolIncrease, postF:`=${ref('B7')}+${ref('B8')}`}]:[]),
+    ...safeResults.map(sr=>({name:sr.name||'SAFE investor', preS:0, preF:null, postS:sr.safeShares, postF:null})),
     ...(ourInvest>0?[
-      ['Our investment', ourShares, `=${ref('E9')}`, ourShares/postFD, `=${ref('E9')}/${ref('E8')}`],
-      ...(otherShares>0?[['Other New Investors', otherShares, otherShares, otherShares/postFD, otherShares/postFD]]:[]),
-    ]:[['New Investors', newRoundShares, `=${ref('E7')}`, newRoundShares/postFD, `=${ref('E7')}/${ref('E8')}`]]),
+      {name:'Our investment', preS:0, preF:null, postS:ourShares, postF:`=${ref('E9')}`},
+      ...(otherShares>0?[{name:'Other New Investors', preS:0, preF:null, postS:otherShares, postF:null}]:[]),
+    ]:[{name:'New Investors', preS:0, preF:null, postS:newRoundShares, postF:`=${ref('E7')}`}]),
   ];
 
   const ws2={}; ws2['!ref']=`A1:F${5+capRows.length+2}`;
@@ -1951,28 +1952,27 @@ function exportExcel() {
   ws2['E3']={v:'Post %',t:'s'};
   ws2['F3']={v:'Δ pp',t:'s'};
 
+  const totalR0=4+capRows.length+1; // computed up front so row formulas can reference the total row
+  // Pre-round total = sharesO+pa only (excludes the pool increase, which doesn't exist pre-round) — NOT
+  // preFDTotal (that includes the increase). Using preFDTotal here would make the Pre % column not sum to 100%.
+  const preRoundTotal = sharesO+pa;
   capRows.forEach((row,i)=>{
     const r=i+4;
-    ws2[`A${r}`]={v:row[0],t:'s'};
-    const preS=typeof row[1]==='number'?row[1]:0;
-    const postS=typeof row[1]==='number'?row[1]:0;
-    ws2[`B${r}`]={v:preS,t:'n',z:'#,##0'};
-    if(typeof row[2]==='string'){setF(ws2,`C${r}`,preS/preFDTotal,row[2],'0.00%');}
-    else{ws2[`C${r}`]={v:row[2]||0,t:'n',z:'0.00%'};}
-    const postN=typeof row[1]==='number'?row[1]:0;
-    ws2[`D${r}`]={v:postN,t:'n',z:'#,##0'};
-    if(typeof row[4]==='string'){setF(ws2,`E${r}`,postN/postFD,row[4],'0.00%');}
-    else{ws2[`E${r}`]={v:row[4]||0,t:'n',z:'0.00%'};}
-    // Δ formula
-    setF(ws2,`F${r}`,(postN/postFD-preS/preFDTotal)*100,`=(E${r}-C${r})*100`,'0.00');
+    ws2[`A${r}`]={v:row.name,t:'s'};
+    ws2[`B${r}`]={v:row.preS,t:'n',z:'#,##0'};
+    if(row.preF){setF(ws2,`C${r}`,row.preS/preRoundTotal,`=B${r}/B${totalR0}`,'0.00%');}
+    else{ws2[`C${r}`]={v:preRoundTotal>0?row.preS/preRoundTotal:0,t:'n',z:'0.00%'};}
+    ws2[`D${r}`]={v:row.postS,t:'n',z:'#,##0'};
+    setF(ws2,`E${r}`,postFD>0?row.postS/postFD:0,`=D${r}/D${totalR0}`,'0.00%');
+    setF(ws2,`F${r}`,(row.postS/postFD-row.preS/(preRoundTotal||1))*100,`=(E${r}-C${r})*100`,'0.00');
   });
 
-  const totalR=4+capRows.length+1;
+  const totalR=totalR0;
   ws2[`A${totalR}`]={v:'Total FD',t:'s'};
-  setF(ws2,`B${totalR}`,preFDTotal,`=${ref('E5')}`,'#,##0');
-  ws2[`C${totalR}`]={v:1,t:'n',z:'0.00%'};
+  setF(ws2,`B${totalR}`,preRoundTotal,`=${ref('B6')}+${ref('B7')}`,'#,##0');
+  setF(ws2,`C${totalR}`,1,`=B${totalR}/B${totalR}`,'0.00%');
   setF(ws2,`D${totalR}`,postFD,`=${ref('E8')}`,'#,##0');
-  ws2[`E${totalR}`]={v:1,t:'n',z:'0.00%'};
+  setF(ws2,`E${totalR}`,1,`=D${totalR}/D${totalR}`,'0.00%');
 
   XLSX.utils.book_append_sheet(wb,ws2,'Pro Forma');
 
