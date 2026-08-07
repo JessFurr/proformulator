@@ -828,7 +828,7 @@ html.tq-print-prep .sky-bg{background:#fff!important;background-image:none!impor
   <div class="empty"><strong>Enter round terms to model the cap table</strong>Fill in pre-money valuation, round size, shares outstanding, and existing option pool at minimum.</div>
 </div>
 </div>
-<div id="privConfidential" style="display:block;position:fixed;bottom:0;right:0;width:calc((100vw - 285px) / 2);font-size:9px;color:rgba(20,40,70,.65);letter-spacing:.1px;user-select:none;text-align:justify;line-height:1.6;background:rgba(245,247,250,.96);padding:10px 16px;border-top:1px solid rgba(50,61,67,.15);border-left:1px solid rgba(50,61,67,.1);z-index:1">
+<div id="privConfidential" style="display:block;position:fixed;bottom:0;right:0;width:calc((100vw - 285px) / 2);font-size:9px;color:rgba(20,40,70,.65);letter-spacing:.1px;user-select:none;text-align:justify;line-height:1.6;background:rgba(245,247,250,.96);padding:10px 16px;border-top:1px solid rgba(50,61,67,.15);border-left:1px solid rgba(50,61,67,.1);z-index:50">
   This calculator is provided for informational purposes only by Lawgorithm Advisors PLLC (&ldquo;Lawgorithm&rdquo;). Lawgorithm does not provide legal, tax, or financial advice through this tool, and use of this calculator is not a substitute for professional legal or financial advice or services, nor should it be used as a basis for any decision or action that may affect your business or interests. USE OF THIS CALCULATOR IS ENTIRELY AT YOUR OWN RISK, AND LAWGORITHM ASSUMES NO LIABILITY FOR THE USE OF OR RELIANCE ON THIS CALCULATOR. Results are illustrative estimates only and may not reflect actual cap table outcomes. This calculator is provided &ldquo;as is&rdquo; without warranty of any kind. &copy; 2026 Lawgorithm Advisors PLLC &middot; For Discussion Purposes Only
 </div>
 
@@ -880,7 +880,7 @@ function nInput(el) {
   try { el.setSelectionRange(pos,pos); } catch(e){}
   recalcDebounced();
 }
-function nFocus(el) { setTimeout(()=>el.select(),0); }
+function nFocus(el) { /* no-op: don't select-all on focus — it blocked editing a single digit in place */ }
 function nBlur(el)  { const r=el.value.replace(/[^\d]/g,''); if(r) el.value=parseInt(r,10).toLocaleString('en-US'); recalc(); }
 function parseN(s)  { return parseFloat((s||'').replace(/[^\d.]/g,''))||0; }
 function fmtN(v)   { const n=parseInt((v||'').toString().replace(/[^\d]/g,''),10); return isNaN(n)?'':(n).toLocaleString('en-US'); }
@@ -2025,7 +2025,7 @@ const fmtDollar=n=>n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFrac
 // ─── PERSIST ──────────────────────────────────────────────────────────────────
 function save() {
   const vals={};
-  ['preMoney','roundSize','ourInvest','preFDShares','poolPct','poolAvail','poolPreReserved','existingPref','dividendRatePct','scenA','scenB'].forEach(id=>{const el=document.getElementById(id);if(el)vals[id]=el.value;});
+  ['preMoney','roundSize','ourInvest','preFDShares','poolPct','poolAvail','poolPreReserved','promisedOptions','existingPref','dividendRatePct','scenA','scenB'].forEach(id=>{const el=document.getElementById(id);if(el)vals[id]=el.value;});
   const scenFactorEl=document.getElementById('scenFactor'); if(scenFactorEl)vals.scenFactor=scenFactorEl.value;
   try{localStorage.setItem(LS,JSON.stringify({...vals,scenValTyp,safes,safeCounter,diluters,diluterCounter}));}catch(e){}
 }
@@ -2033,7 +2033,7 @@ function load() {
   try{
     const raw=localStorage.getItem(LS);if(!raw)return;
     const s=JSON.parse(raw);
-    ['preMoney','roundSize','ourInvest','preFDShares','poolPct','poolAvail','poolPreReserved','existingPref','dividendRatePct','scenA','scenB'].forEach(id=>{const el=document.getElementById(id);if(el&&s[id])el.value=s[id];});
+    ['preMoney','roundSize','ourInvest','preFDShares','poolPct','poolAvail','poolPreReserved','promisedOptions','existingPref','dividendRatePct','scenA','scenB'].forEach(id=>{const el=document.getElementById(id);if(el&&s[id])el.value=s[id];});
     if(s.scenFactor){const el=document.getElementById('scenFactor');if(el)el.value=s.scenFactor;}
     if(s.scenValTyp){scenValTyp=s.scenValTyp;}
     if(Array.isArray(s.safes)&&s.safes.length){safes=s.safes;safeCounter=s.safeCounter||safes.reduce((m,s)=>Math.max(m,s.id),0);renderSafes();}
@@ -2043,7 +2043,7 @@ function load() {
   }catch(e){}
 }
 function clearAll(){
-  ['preMoney','roundSize','ourInvest','preFDShares','poolPct','poolAvail','poolPreReserved','existingPref','dividendRatePct','scenA','scenB'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['preMoney','roundSize','ourInvest','preFDShares','poolPct','poolAvail','poolPreReserved','promisedOptions','existingPref','dividendRatePct','scenA','scenB'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   safes=[];safeCounter=0;diluters=[];diluterCounter=0;
   renderSafes();renderDiluters();updateScenLabels();recalc();
   try{localStorage.removeItem(LS);}catch(e){}
@@ -2306,7 +2306,26 @@ function syncValUI(m){
 }
 function toggleLeftPanel(){
   document.body.classList.toggle('left-hidden');
+  setTimeout(positionDisclaimer,260); // after the .left transform transition finishes
 }
+// The disclaimer's left edge was hardcoded to assume a fixed 285px-wide left panel — wrong
+// once the panel is collapsed or drag-resized (both supported), which could push the
+// disclaimer off past the visible area or collapse its width to ~0. Bind it to the panel's
+// actual current edge instead, and keep it in sync on load, resize, and drag.
+function positionDisclaimer(){
+  const disc=document.getElementById('privConfidential');
+  const leftPanel=document.querySelector('.left');
+  if(!disc||!leftPanel) return;
+  const edge=document.body.classList.contains('left-hidden')?0:leftPanel.getBoundingClientRect().right;
+  disc.style.left=Math.max(0,edge)+'px';
+  disc.style.width='auto';
+}
+window.addEventListener('resize',positionDisclaimer);
+try{
+  const _leftPanelEl=document.querySelector('.left');
+  if(_leftPanelEl && window.ResizeObserver) new ResizeObserver(positionDisclaimer).observe(_leftPanelEl);
+}catch(e){}
+positionDisclaimer(); // this script runs after both .left and #privConfidential are already parsed
 function setValMode(m){
   valuationMode=m;syncValUI(m);
   try{localStorage.setItem('tq-valmode',m);}catch(e){}
