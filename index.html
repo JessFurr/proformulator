@@ -771,6 +771,8 @@ html.tq-print-prep .sky-bg{background:#fff!important;background-image:none!impor
       <div class="pool-calc" id="poolCalcDisplay"></div>
       <div class="field" style="margin-top:7px;margin-bottom:0"><label>Issued Shares from Stock Plan</label>
         <div class="iw"><span class="ip">#</span><input type="text" inputmode="numeric" id="poolPreReserved" placeholder="500,000" oninput="nInput(this)" onblur="nBlur(this)" onfocus="nFocus(this)"></div></div>
+      <div class="field" style="margin-top:7px;margin-bottom:0"><label>Promised Options</label><span style="font-size:9px;color:var(--muted);display:block">promised, not yet granted — included in Company Capitalization</span>
+        <div class="iw"><span class="ip">#</span><input type="text" inputmode="numeric" id="promisedOptions" placeholder="0" oninput="nInput(this)" onblur="nBlur(this)" onfocus="nFocus(this)"></div></div>
       <div class="field" style="margin-top:7px;margin-bottom:0"><label>Existing Preferred Shares</label>
         <div class="iw"><span class="ip">#</span><input type="text" inputmode="numeric" id="existingPref" placeholder="0 if first preferred round" oninput="nInput(this)" onblur="nBlur(this)" onfocus="nFocus(this)"></div></div>
     </div>
@@ -999,7 +1001,10 @@ const round0=n=>Math.round(n);
 // ─── MAIN CALC ────────────────────────────────────────────────────────────────
 function recalc() {
   save();
-  const roundSize=pf('roundSize'),ourInvest=pf('ourInvest'),sharesO=pf('preFDShares'),preReserved=pf('poolPreReserved')||pf('poolAvail');const preFDBase=sharesO+preReserved;
+  const roundSize=pf('roundSize'),ourInvest=pf('ourInvest'),sharesO=pf('preFDShares'),preReserved=pf('poolPreReserved')||pf('poolAvail'),promisedOpts=pf('promisedOptions');
+  // Promised Options are included in Company Capitalization for BOTH pre- and post-money SAFEs (per YC),
+  // unlike the option pool increase — so they're folded into preFDBase, not treated like a pool top-up.
+  const preFDBase=sharesO+preReserved+promisedOpts;
   const _rawVal=pf('preMoney');
   // Valuation mode: input may be pre-money or post-money
   const preMoney=valuationMode==='post'?Math.max(0,_rawVal-roundSize):_rawVal;
@@ -1013,12 +1018,12 @@ function recalc() {
   // ── Master iterative solve ────────────────────────────────────────────────
   // Co-solves pool, PPS, and all SAFE conversions in one loop until convergence.
   const pp=pf('poolPct')/100, pa=pf('poolAvail'), poolIssuedPre=pf('poolPreReserved');
-  let poolIncrease=0, preFDTotal=sharesO+pa, pps=round4(preMoney/(sharesO+pa));
+  let poolIncrease=0, preFDTotal=sharesO+pa+promisedOpts, pps=round4(preMoney/(sharesO+pa+promisedOpts));
   let newRoundShares=roundD(roundSize/pps), totalSAFEShares=0;
   const flags=[], safeResults=[];
 
   for(let master=0;master<100;master++){
-    preFDTotal=sharesO+pa+poolIncrease;
+    preFDTotal=sharesO+pa+promisedOpts+poolIncrease;
     // Pre-$:  preMoney / (preFDTotal + SAFEs)
     // Post-$: postMoney / (preFDTotal + SAFEs + newRoundShares)  [full post-$ FD]
     pps=valuationMode==='post'
@@ -1114,7 +1119,7 @@ function recalc() {
   const c3v=roundSize/pps,c3p=Math.abs(c3v-newRoundShares)<1;
 
   // Colors
-  const C1='#f5c518',C2='#1e3a8a',C3='#7ec8e3',C4='#fff',C5='#27b3e7',C_POOL_NEW='#9bd5f5';
+  const C1='#f5c518',C2='#1e3a8a',C3='#7ec8e3',C4='#fff',C5='#27b3e7',C_POOL_NEW='#9bd5f5',C_PROMISED='#8e6bbf';
 
   // store for export
   lastCalc={pps,newRoundShares,ourShares,otherShares,wireAmt,dividendRate,postMoney,postFD,preFDTotal,preFDBase,sharesO,poolIncrease,safeResults,totalSAFEShares,postReserved,preReserved,preMoney,roundSize,ourInvest,effectiveOurInvest};
@@ -1128,6 +1133,7 @@ function recalc() {
   // Build cap table HTML
   let ctHTML=`<div class="ct-row hdr"><span>Holder</span><span class="ct-sh">Shares</span><span class="ct-pct">% FD</span></div>`;
   ctHTML+=ctRow('Existing Holders',sharesO,sharesO/postFD,C1);
+  if(promisedOpts>0) ctHTML+=ctRow('Promised Options',promisedOpts,promisedOpts/postFD,C_PROMISED);
   if(poolIncrease>0) ctHTML+=ctRow('New stock plan',poolIncrease,poolIncrease/postFD,C_POOL_NEW);
   safeResults.forEach(s=>ctHTML+=ctRow(x(s.name)||'SAFE investor',s.safeShares,s.safeShares/postFD,C5));
   if(effectiveOurInvest>0){
@@ -1141,6 +1147,7 @@ function recalc() {
   const _denom = valuationMode==='post'?postFD:preFDTotal+totalSAFEShares;
   const _fdParts = [`${fmtSh(sharesO)} outstanding`]
       .concat(pa>0?[`${fmtSh(pa)} total stock plan`]:[])
+      .concat(promisedOpts>0?[`${fmtSh(promisedOpts)} promised options`]:[])
       .concat(poolIncrease>0?[`${fmtSh(poolIncrease)} new pool`]:[])
       .concat(totalSAFEShares>0?[`${fmtSh(totalSAFEShares)} SAFEs`]:[])
       .concat(valuationMode==='post'?[`${fmtSh(newRoundShares)} new shares`]:[]);
@@ -1292,10 +1299,16 @@ function recalc() {
   const existingPrePctPS = existingPref>0 && preTotalPreferred>0 ? existingPref/preTotalPreferred : 0;
   if(existingPref>0){
     const commonSh = sharesO - existingPref;
-    spfHTML += spfRow({lbl:'Existing Preferred',dot:'#f5c518',preS:existingPref,prePct:existingPref/(sharesO+pa),preFDPct:existingPref/preFDDenom,inv:0,newSh:0,wire:0,pctFD:existingPref/postFD,pctPS:totalPreferred>0?existingPref/totalPreferred:0,prePctPS:existingPrePctPS,pctSerX:0,delta:(existingPref/postFD)-(existingPref/(sharesO+pa))});
-    if(commonSh>0) spfHTML += spfRow({lbl:'Existing Common',dot:'#e05a7a',dotBorder:'1px solid #e05a7a',preS:commonSh,prePct:commonSh/(sharesO+pa),preFDPct:commonSh/preFDDenom,inv:0,newSh:0,wire:0,pctFD:commonSh/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(commonSh/postFD)-(commonSh/(sharesO+pa))});
+    spfHTML += spfRow({lbl:'Existing Preferred',dot:'#f5c518',preS:existingPref,prePct:existingPref/(sharesO+pa+promisedOpts),preFDPct:existingPref/preFDDenom,inv:0,newSh:0,wire:0,pctFD:existingPref/postFD,pctPS:totalPreferred>0?existingPref/totalPreferred:0,prePctPS:existingPrePctPS,pctSerX:0,delta:(existingPref/postFD)-(existingPref/(sharesO+pa+promisedOpts))});
+    if(commonSh>0) spfHTML += spfRow({lbl:'Existing Common',dot:'#e05a7a',dotBorder:'1px solid #e05a7a',preS:commonSh,prePct:commonSh/(sharesO+pa+promisedOpts),preFDPct:commonSh/preFDDenom,inv:0,newSh:0,wire:0,pctFD:commonSh/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(commonSh/postFD)-(commonSh/(sharesO+pa+promisedOpts))});
   } else {
-    spfHTML += spfRow({lbl:'Existing Holders',dot:C1,preS:sharesO,prePct:sharesO/(sharesO+pa),preFDPct:sharesO/preFDDenom,inv:0,newSh:0,wire:0,pctFD:sharesO/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(sharesO/postFD)-(sharesO/(sharesO+pa))});
+    spfHTML += spfRow({lbl:'Existing Holders',dot:C1,preS:sharesO,prePct:sharesO/(sharesO+pa+promisedOpts),preFDPct:sharesO/preFDDenom,inv:0,newSh:0,wire:0,pctFD:sharesO/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(sharesO/postFD)-(sharesO/(sharesO+pa+promisedOpts))});
+  }
+
+  // Promised Options — promised but ungranted; included in Company Capitalization for both
+  // pre- and post-money SAFEs (per YC), so it's folded into preFDBase, not the pool-increase bucket.
+  if(promisedOpts>0){
+    spfHTML += spfRow({lbl:'Promised Options',dot:C_PROMISED,preS:promisedOpts,prePct:promisedOpts/(sharesO+pa+promisedOpts),preFDPct:promisedOpts/preFDDenom,inv:0,newSh:0,wire:0,pctFD:promisedOpts/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(promisedOpts/postFD)-(promisedOpts/(sharesO+pa+promisedOpts))});
   }
 
   // SAFE investors
@@ -1327,12 +1340,12 @@ function recalc() {
     const postTotal = pa + poolIncrease;
     const totalPrePool = poolAvailToIssue + poolIssued;
     const totalPostPool = postAvail + poolIssued;
-    spfHTML += spfRow({lbl:'Total Stock Plan',dot:C2,italic:false,subtotal:true,preS:totalPrePool,prePct:totalPrePool>0?totalPrePool/(sharesO+pa):0,preFDPct:totalPrePool/preFDDenom,planInc:poolIncrease,inv:0,newSh:0,wire:0,pctFD:totalPostPool/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(totalPostPool/postFD)-(totalPrePool>0?totalPrePool/(sharesO+pa):0)});
+    spfHTML += spfRow({lbl:'Total Stock Plan',dot:C2,italic:false,subtotal:true,preS:totalPrePool,prePct:totalPrePool>0?totalPrePool/(sharesO+pa+promisedOpts):0,preFDPct:totalPrePool/preFDDenom,planInc:poolIncrease,inv:0,newSh:0,wire:0,pctFD:totalPostPool/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(totalPostPool/postFD)-(totalPrePool>0?totalPrePool/(sharesO+pa+promisedOpts):0)});
     if(poolAvailToIssue>0||poolIncrease>0){
-      spfHTML += spfRow({lbl:'Available',dot:C2,italic:true,indent:true,preS:poolAvailToIssue,prePct:poolAvailToIssue>0?poolAvailToIssue/(sharesO+pa):0,preFDPct:poolAvailToIssue/preFDDenom,planInc:poolIncrease,inv:0,newSh:0,wire:0,pctFD:postAvail/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(postAvail/postFD)-(poolAvailToIssue>0?poolAvailToIssue/(sharesO+pa):0)});
+      spfHTML += spfRow({lbl:'Available',dot:C2,italic:true,indent:true,preS:poolAvailToIssue,prePct:poolAvailToIssue>0?poolAvailToIssue/(sharesO+pa+promisedOpts):0,preFDPct:poolAvailToIssue/preFDDenom,planInc:poolIncrease,inv:0,newSh:0,wire:0,pctFD:postAvail/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(postAvail/postFD)-(poolAvailToIssue>0?poolAvailToIssue/(sharesO+pa+promisedOpts):0)});
     }
     if(poolIssued>0){
-      spfHTML += spfRow({lbl:'Issued',dot:C2,italic:true,indent:true,preS:poolIssued,prePct:poolIssued/(sharesO+pa),preFDPct:poolIssued/preFDDenom,planInc:0,inv:0,newSh:0,wire:0,pctFD:poolIssued/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(poolIssued/postFD)-(poolIssued/(sharesO+pa))});
+      spfHTML += spfRow({lbl:'Issued',dot:C2,italic:true,indent:true,preS:poolIssued,prePct:poolIssued/(sharesO+pa+promisedOpts),preFDPct:poolIssued/preFDDenom,planInc:0,inv:0,newSh:0,wire:0,pctFD:poolIssued/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(poolIssued/postFD)-(poolIssued/(sharesO+pa+promisedOpts))});
     }
   }
 
@@ -1345,7 +1358,7 @@ function recalc() {
   spfHTML+=`</tbody><tfoot>
     <tr class="total">
       <td>Total FD</td>
-      <td class="pre">${fmtSh(sharesO+pa)}</td><td class="pre">100.00%</td><td class="pre spf-div" style="font-weight:700">${preTotalPreferred>0?'100.00%':'—'}</td>
+      <td class="pre">${fmtSh(sharesO+pa+promisedOpts)}</td><td class="pre">100.00%</td><td class="pre spf-div" style="font-weight:700">${preTotalPreferred>0?'100.00%':'—'}</td>
       <td style="text-align:right;font-weight:700">${totalSAFEShares>0?fmtSh(totalSAFEShares):'—'}</td>
       <td style="font-weight:700;border-right:1px solid #c8d8e8">100.00%</td>
       <td style="text-align:right;font-weight:700">${newRoundShares>0?fmtSh(newRoundShares):'—'}</td>
