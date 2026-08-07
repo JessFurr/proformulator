@@ -154,6 +154,7 @@ body.left-hidden .left{transform:translateX(-340px)}
 .dc-body .card{margin:0;background:transparent;border:none;box-shadow:none;border-radius:0;padding:0}
 .dc-body .card-title{display:none} /* title already shown in drag handle */
 .spf-div{border-right:2px solid var(--border-strong) !important}
+.spf-light-div{border-right:1px solid var(--border) !important}
 .dc-body .ds-strip{margin:0;border:none;box-shadow:none}
 .dc-body .chart-card{margin:0;background:transparent;border:none;box-shadow:none;padding:8px 0}
 .dc-body .sl{margin:6px 0 4px}
@@ -198,9 +199,9 @@ body.left-hidden .left{transform:translateX(-340px)}
 .gn-main{writing-mode:vertical-rl;text-orientation:mixed;font-family:'Noto Serif SC',Georgia,serif;font-size:82px;font-weight:900;color:#000;line-height:1;letter-spacing:.06em;user-select:none;white-space:nowrap}
 /* ── SIMPLE PRO FORMA TABLE ── */
 .spf{width:100%;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums;margin-top:2px}
-.spf th{font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);padding:4px 8px;text-align:right;border-bottom:2px solid var(--border-strong)}
+.spf th{font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);padding:4px 4px;text-align:right;border-bottom:2px solid var(--border-strong)}
 .spf th:first-child{text-align:left;padding-left:4px}
-.spf td{padding:5px 8px;border-bottom:1px solid var(--border);color:var(--text);text-align:right}
+.spf td{padding:5px 4px;border-bottom:1px solid var(--border);color:var(--text);text-align:right}
 .spf td:first-child{text-align:left;padding-left:4px}
 /* Center-align ALL non-first columns — first column stays left */
 .spf th:not(:first-child),.spf td:not(:first-child){text-align:center !important}
@@ -858,6 +859,7 @@ const LS = 'lawgorithm-proforma-v3';
 let safes = [], safeCounter = 0;
 let diluters = [], diluterCounter = 0;
 let lastCalc = null;
+let quickWireAmt = ''; // persisted across recalc() rebuilds — Deal Mechanics wire calculator
 
 // ─── COMMA FORMATTING ────────────────────────────────────────────────────────
 let _recalcTimer = null;
@@ -978,6 +980,19 @@ let ppsDec=5; // settable via Settings → Formulas
 const round4=n=>{const f=Math.pow(10,ppsDec);return Math.round(n*f)/f;};
 const roundD=n=>Math.floor(n);
 const roundU2=n=>Math.ceil(parseFloat((n).toPrecision(14))*100)/100;
+// Deal Mechanics wire calculator — updates its own output span directly (no recalc()),
+// so typing in it doesn't trigger a full results re-render and blow away focus/cursor.
+function updateQuickWire(el) {
+  const raw = el.value.replace(/[^\d]/g,'');
+  const fmtVal = raw ? parseInt(raw,10).toLocaleString('en-US') : '';
+  el.value = fmtVal;
+  quickWireAmt = fmtVal;
+  const out = document.getElementById('quickWireOutput');
+  if (!out) return;
+  if (!raw || !lastCalc || !lastCalc.pps) { out.textContent = '—'; return; }
+  const amt = parseInt(raw,10), sh = roundD(amt/lastCalc.pps), wire = roundU2(lastCalc.pps*sh);
+  out.textContent = `$${fmtDollar(wire)} (${sh.toLocaleString('en-US')} sh)`;
+}
 const round0=n=>Math.round(n);
 
 
@@ -1018,8 +1033,9 @@ function recalc() {
     for(const s of safes){
       const amt=parseN(s.amount); if(!amt||s.type==='post')continue;
       const cap=parseN(s.cap),disc=parseFloat(s.discount)||0;
-      // Cap denominator = preFDBase (no pool) + all SAFE shares — matches spreadsheet D30+G30
-      const capPPS=cap>0?round4(cap/(preFDBase+totalSAFEShares)):null,discPPS=disc>0?round4(pps*(disc/100)):null;
+      // Cap denominator (pre-money SAFE) = preFDBase + pool increase, EXCLUDING other converting SAFEs
+      // — matches YC's "Original Safe" Company Capitalization (pool increase included, other safes/notes excluded)
+      const capPPS=cap>0?round4(cap/(preFDBase+poolIncrease)):null,discPPS=disc>0?round4(pps*(disc/100)):null;
       let safePPS,basis;
       if(capPPS&&discPPS){safePPS=Math.min(capPPS,discPPS);basis=capPPS<=discPPS?`Cap wins (${fmtPPS(capPPS)})`:`Discount wins (${fmtPPS(discPPS)})`;}
       else if(capPPS)    {safePPS=capPPS;basis=`Cap: $${fmt(cap)}`;}
@@ -1128,7 +1144,7 @@ function recalc() {
       .concat(poolIncrease>0?[`${fmtSh(poolIncrease)} new pool`]:[])
       .concat(totalSAFEShares>0?[`${fmtSh(totalSAFEShares)} SAFEs`]:[])
       .concat(valuationMode==='post'?[`${fmtSh(newRoundShares)} new shares`]:[]);
-  const ppsMathDetail = `<span style="color:var(--muted);font-size:9px;display:block;margin-top:2px">${_fdParts.join(' + ')} = ${fmtSh(_denom)}</span>`;
+  const ppsMathDetail = `<div style="color:var(--muted);font-size:9px;margin-top:3px;padding-left:12px"><span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--muted);margin-right:5px;vertical-align:middle"></span>(${_fdParts.join(' + ')} = ${fmtSh(_denom)})</div>`;
   h+=`<div class="card"><div class="card-title">Deal Mechanics</div>
     <div class="ds-strip" style="margin:-4px -4px 8px -4px;border-radius:6px 6px 0 0">
       <div class="ds-cell"><div class="ds-label">Pre-Money</div><div class="ds-val">${fmtM(preMoney)}</div></div>
@@ -1143,6 +1159,13 @@ function recalc() {
     <div class="dr"><div class="dr-left"><div class="lbl">Aggregate New Shares</div></div><div class="dr-val">${fmtSh(newRoundShares)}</div></div>
     ${effectiveOurInvest>0?`<div class="dr"><div class="dr-left"><div class="lbl">Our Shares</div></div><div class="dr-val green">${fmtSh(ourShares)}</div></div>
     <div class="dr"><div class="dr-left"><div class="lbl">Wire Amount</div></div><div class="dr-val green">$${fmtDollar(wireAmt)}</div></div>`:''}
+    <div class="dr" style="border-top:1px solid var(--border);margin-top:4px;padding-top:6px">
+      <div class="dr-left"><div class="lbl">Wire Calculator</div><div class="sub" style="font-size:9px">enter any investment $ at this PPS</div></div>
+      <div style="text-align:right">
+        <input type="text" id="quickWireInput" value="${quickWireAmt}" placeholder="e.g. 100,000" oninput="updateQuickWire(this)" style="width:110px;text-align:right;font-family:inherit;font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--card-bg);color:var(--text)">
+        <div id="quickWireOutput" class="dr-val green" style="margin-top:3px">${quickWireAmt?(()=>{const amt=parseN(quickWireAmt),sh=roundD(amt/pps),wire=roundU2(pps*sh);return `$${fmtDollar(wire)} (${fmtSh(sh)} sh)`;})():'—'}</div>
+      </div>
+    </div>
   </div>`;
   h+=`<div class="card"><div class="card-title">Pro Forma Cap Table</div>${ctHTML}</div>`;
 
@@ -1198,12 +1221,12 @@ function recalc() {
     <tr>
       <th style="text-align:left;min-width:120px">Holder</th>
       <th class="pre"># of FD Shares</th><th class="pre">% of FD Shares</th><th class="pre spf-div">% of PS</th>
-      <th class="spf-ps-div">↑ to Plan</th>
       <th>SAFE Shares</th>
       <th style="border-right:1px solid #c8d8e8">% of FD post SAFE</th>
       <th>New $ Shares</th>
       <th>New $</th>
-      <th class="spf-div">Wire Amount</th>
+      <th class="spf-light-div">Wire Amount</th>
+      <th class="spf-div">↑ to Plan</th>
       <th style="font-weight:700">Total Shares</th>
       <th>% of FD</th>
       <th>FD Dilution</th>
@@ -1215,11 +1238,13 @@ function recalc() {
 
   // Helper: build a 12-col SPF row
   // prePctPS = holder's % of preferred BEFORE this round (existingPref / preTotalPreferred)
-  const preFDDenom = preFDTotal + totalSAFEShares;
-  const spfRow = ({lbl, dot, dotBorder, italic, indent, preS, prePct, planInc, safeNewSh, inv, newSh, wire, pctFD, preFDPct, pctPS, prePctPS, pctSerX, delta}) => {
+  // preFDDenom excludes the pool increase on purpose — "% of FD post SAFE" is the checkpoint
+  // right after SAFEs convert, before the plan top-up (shown later, in the ↑ to Plan column).
+  const preFDDenom = preFDBase + totalSAFEShares;
+  const spfRow = ({lbl, dot, dotBorder, italic, indent, subtotal, preS, prePct, planInc, safeNewSh, inv, newSh, wire, pctFD, preFDPct, pctPS, prePctPS, pctSerX, delta}) => {
     const postSh = (preS||0) + (planInc||0) + (safeNewSh||0) + (newSh||0);
     const brd = dotBorder?`border:${dotBorder};`:'';
-    const st = indent?'padding-left:24px;color:var(--text)':italic?'font-style:italic;color:var(--muted)':'';
+    const st = `${indent?'padding-left:24px;':''}${italic?'font-style:italic;color:var(--muted);':indent?'color:var(--text);':''}${subtotal?'font-weight:700':''}`;
     const preSDisp  = preS>0?fmtSh(preS):'—';
     const prePDisp  = prePct>0?fmtPct(prePct):'—';
     const invDisp      = inv>0?'$'+fmt(inv):'—';
@@ -1243,15 +1268,15 @@ function recalc() {
     const dDisp = `<span style="color:${dColor};font-weight:600">${dVal.toFixed(2)}%</span>`;
     const relChg = prePct>0 ? (delta/prePct)*100 : null;
     const relDisp = relChg!=null ? `<span style="color:${dColor};font-weight:600">${relChg.toFixed(1)}%</span>` : '—';
-    return `<tr${(!indent&&italic)?' style="opacity:.8"':''}>
+    return `<tr${subtotal?' style="border-top:1px solid var(--border-strong)" title="Subtotal — equals the sum of the breakdown rows below (e.g. Available + Issued). Don’t add it again when totaling the column."':(!indent&&italic)?' style="opacity:.8"':''}>
       <td style="${st}"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dot};${brd}margin-right:6px;vertical-align:middle"></span>${lbl}</td>
       <td class="pre">${preSDisp}</td><td class="pre">${prePDisp}</td><td class="pre spf-div">${(prePctPS||0)>0?fmtPct(prePctPS):'—'}</td>
-      <td class="spf-ps-div" style="text-align:right">${planIncDisp}</td>
       <td style="text-align:right">${safeNewShDisp}</td>
       <td style="border-right:1px solid #c8d8e8">${preFDPct>0?fmtPct(preFDPct):'—'}</td>
       <td style="text-align:right">${newShDisp}</td>
       <td style="text-align:right">${invDisp}</td>
-      <td class="spf-div" style="text-align:right;font-weight:${wire>0?600:400}">${wireDisp}</td>
+      <td class="spf-light-div" style="text-align:right;font-weight:${wire>0?600:400}">${wireDisp}</td>
+      <td class="spf-div" style="text-align:right">${planIncDisp}</td>
       <td style="text-align:right;font-weight:600">${postDisp}</td>
       <td>${pctFDDisp}</td>
       <td style="text-align:right">${dDisp}</td>
@@ -1267,10 +1292,10 @@ function recalc() {
   const existingPrePctPS = existingPref>0 && preTotalPreferred>0 ? existingPref/preTotalPreferred : 0;
   if(existingPref>0){
     const commonSh = sharesO - existingPref;
-    spfHTML += spfRow({lbl:'Existing Preferred',dot:'#f5c518',preS:existingPref,prePct:existingPref/preFDTotal,preFDPct:existingPref/preFDDenom,inv:0,newSh:0,wire:0,pctFD:existingPref/postFD,pctPS:totalPreferred>0?existingPref/totalPreferred:0,prePctPS:existingPrePctPS,pctSerX:0,delta:(existingPref/postFD)-(existingPref/preFDTotal)});
-    if(commonSh>0) spfHTML += spfRow({lbl:'Existing Common',dot:'#e05a7a',dotBorder:'1px solid #e05a7a',preS:commonSh,prePct:commonSh/preFDTotal,preFDPct:commonSh/preFDDenom,inv:0,newSh:0,wire:0,pctFD:commonSh/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(commonSh/postFD)-(commonSh/preFDTotal)});
+    spfHTML += spfRow({lbl:'Existing Preferred',dot:'#f5c518',preS:existingPref,prePct:existingPref/(sharesO+pa),preFDPct:existingPref/preFDDenom,inv:0,newSh:0,wire:0,pctFD:existingPref/postFD,pctPS:totalPreferred>0?existingPref/totalPreferred:0,prePctPS:existingPrePctPS,pctSerX:0,delta:(existingPref/postFD)-(existingPref/(sharesO+pa))});
+    if(commonSh>0) spfHTML += spfRow({lbl:'Existing Common',dot:'#e05a7a',dotBorder:'1px solid #e05a7a',preS:commonSh,prePct:commonSh/(sharesO+pa),preFDPct:commonSh/preFDDenom,inv:0,newSh:0,wire:0,pctFD:commonSh/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(commonSh/postFD)-(commonSh/(sharesO+pa))});
   } else {
-    spfHTML += spfRow({lbl:'Existing Holders',dot:C1,preS:sharesO,prePct:sharesO/preFDTotal,preFDPct:sharesO/preFDDenom,inv:0,newSh:0,wire:0,pctFD:sharesO/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(sharesO/postFD)-(sharesO/preFDTotal)});
+    spfHTML += spfRow({lbl:'Existing Holders',dot:C1,preS:sharesO,prePct:sharesO/(sharesO+pa),preFDPct:sharesO/preFDDenom,inv:0,newSh:0,wire:0,pctFD:sharesO/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(sharesO/postFD)-(sharesO/(sharesO+pa))});
   }
 
   // SAFE investors
@@ -1302,12 +1327,12 @@ function recalc() {
     const postTotal = pa + poolIncrease;
     const totalPrePool = poolAvailToIssue + poolIssued;
     const totalPostPool = postAvail + poolIssued;
-    spfHTML += spfRow({lbl:'Total Stock Plan',dot:C2,italic:false,preS:totalPrePool,prePct:totalPrePool>0?totalPrePool/preFDTotal:0,preFDPct:totalPostPool/preFDDenom,planInc:poolIncrease,inv:0,newSh:0,wire:0,pctFD:totalPostPool/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(totalPostPool/postFD)-(totalPrePool>0?totalPrePool/preFDTotal:0)});
+    spfHTML += spfRow({lbl:'Total Stock Plan',dot:C2,italic:false,subtotal:true,preS:totalPrePool,prePct:totalPrePool>0?totalPrePool/(sharesO+pa):0,preFDPct:totalPrePool/preFDDenom,planInc:poolIncrease,inv:0,newSh:0,wire:0,pctFD:totalPostPool/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(totalPostPool/postFD)-(totalPrePool>0?totalPrePool/(sharesO+pa):0)});
     if(poolAvailToIssue>0||poolIncrease>0){
-      spfHTML += spfRow({lbl:'Shares Available in the Stock Plan',dot:C2,italic:false,indent:true,preS:poolAvailToIssue,prePct:poolAvailToIssue>0?poolAvailToIssue/preFDTotal:0,preFDPct:postAvail/preFDDenom,planInc:poolIncrease,inv:0,newSh:0,wire:0,pctFD:postAvail/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(postAvail/postFD)-(poolAvailToIssue>0?poolAvailToIssue/preFDTotal:0)});
+      spfHTML += spfRow({lbl:'Available',dot:C2,italic:true,indent:true,preS:poolAvailToIssue,prePct:poolAvailToIssue>0?poolAvailToIssue/(sharesO+pa):0,preFDPct:poolAvailToIssue/preFDDenom,planInc:poolIncrease,inv:0,newSh:0,wire:0,pctFD:postAvail/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(postAvail/postFD)-(poolAvailToIssue>0?poolAvailToIssue/(sharesO+pa):0)});
     }
     if(poolIssued>0){
-      spfHTML += spfRow({lbl:'Issued',dot:C2,italic:false,indent:true,preS:poolIssued,prePct:poolIssued/preFDTotal,preFDPct:poolIssued/preFDDenom,planInc:0,inv:0,newSh:0,wire:0,pctFD:poolIssued/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(poolIssued/postFD)-(poolIssued/preFDTotal)});
+      spfHTML += spfRow({lbl:'Issued',dot:C2,italic:true,indent:true,preS:poolIssued,prePct:poolIssued/(sharesO+pa),preFDPct:poolIssued/preFDDenom,planInc:0,inv:0,newSh:0,wire:0,pctFD:poolIssued/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(poolIssued/postFD)-(poolIssued/(sharesO+pa))});
     }
   }
 
@@ -1321,12 +1346,12 @@ function recalc() {
     <tr class="total">
       <td>Total FD</td>
       <td class="pre">${fmtSh(sharesO+pa)}</td><td class="pre">100.00%</td><td class="pre spf-div" style="font-weight:700">${preTotalPreferred>0?'100.00%':'—'}</td>
-      <td class="spf-ps-div" style="text-align:right;font-weight:700">${poolIncrease>0?fmtSh(poolIncrease):'—'}</td>
       <td style="text-align:right;font-weight:700">${totalSAFEShares>0?fmtSh(totalSAFEShares):'—'}</td>
       <td style="font-weight:700;border-right:1px solid #c8d8e8">100.00%</td>
       <td style="text-align:right;font-weight:700">${newRoundShares>0?fmtSh(newRoundShares):'—'}</td>
       <td style="text-align:right;font-weight:700">$${fmt(totalNewMoney)}</td>
-      <td class="spf-div" style="text-align:right;font-weight:700">$${fmtDollar(totalWire)}</td>
+      <td class="spf-light-div" style="text-align:right;font-weight:700">$${fmtDollar(totalWire)}</td>
+      <td class="spf-div" style="text-align:right;font-weight:700">${poolIncrease>0?fmtSh(poolIncrease):'—'}</td>
       <td style="font-weight:700">${fmtSh(postFD)}</td>
       <td style="font-weight:700">100.00%</td>
       <td></td>
@@ -1477,6 +1502,27 @@ function recalc() {
   h+=chk(c1p,`FD Post-$ × PPS = Post-Money${c1note}`,`${fmtSh(postFD)} × ${fmtPPS(pps)} = ${fmtM(c1v)} (target: ${fmtM(postMoney)})`);
   h+=chk(c2p,'Total Investment ÷ Total Shares = PPS',`$${fmt(roundSize)} ÷ ${fmtSh(newRoundShares)} = ${fmtPPS(round4(c2v))} (target: ${fmtPPS(pps)})`);
   h+=chk(c3p,'Total New Money ÷ PPS = Aggregate Shares',`$${fmt(roundSize)} ÷ ${fmtPPS(pps)} = ${fmtSh(Math.round(c3v))} (target: ${fmtSh(newRoundShares)})`);
+  // Per-SAFE cap check (pre-money only): SAFE $ ÷ Cap should equal SAFE shares ÷ (pre-$ FD + pool increase) —
+  // this is the pre-money SAFE's own Company Capitalization basis, which excludes other converting SAFEs (per YC).
+  // It will legitimately differ from the "% of FD post SAFE" column once more than one pre-money SAFE is stacked.
+  safeResults.filter(s=>s.type!=='post'&&parseN(s.cap)>0).forEach(s=>{
+    const cap=parseN(s.cap), denom=preFDBase+poolIncrease;
+    const targetPct=s.amt/cap, actualPct=denom>0?s.safeShares/denom:0;
+    const diff=targetPct-actualPct; // ROUNDDOWN on shares means diff should be small and non-negative
+    const passSafe=diff>=-0.0001 && diff<=(1/Math.max(denom,1))+0.0001;
+    h+=chk(passSafe, `${x(s.name)||'SAFE'}: $ ÷ Cap = % of Cap Basis (pre-$ FD + pool increase)`, `$${fmt(s.amt)} ÷ $${fmt(cap)} = ${fmtPct(targetPct)} (target: ${fmtPct(actualPct)})`);
+  });
+  // Per-SAFE: SAFE $ ÷ Val Cap should equal the "% of FD post SAFE" column value for that same row.
+  // This compares straight against the displayed column — it will fail if the cap-price denominator
+  // (preFDBase + pool increase) and the column's denominator (preFDBase + totalSAFEShares) diverge,
+  // e.g. when pool increase ≠ total SAFE shares. That's a real signal, not a check bug — the column
+  // is the running FD total up to that point (all SAFEs counted together); the cap price is not.
+  safeResults.filter(s=>parseN(s.cap)>0).forEach(s=>{
+    const cap=parseN(s.cap);
+    const targetPct=s.amt/cap, colPct=preFDDenom>0?s.safeShares/preFDDenom:0;
+    const passSafe2 = Math.abs(targetPct-colPct) < 0.0005;
+    h+=chk(passSafe2, `${x(s.name)||'SAFE'}: $ ÷ Val Cap = % of FD post SAFE`, `$${fmt(s.amt)} ÷ $${fmt(cap)} = ${fmtPct(targetPct)} (target: ${fmtPct(colPct)})`);
+  });
   h+=`</div>`;
   h+=`<div style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.5">PPS = ROUND(${valuationMode==='post'?'post-$ value ÷ post-$ FD':'pre-money ÷ pre-$ FD'}, ${ppsDec}). Shares = ROUNDDOWN($ ÷ PPS, 0). Wire = ROUNDUP(PPS × shares, 2). Dividend = ROUND(PPS × divRate%, ${ppsDec}).</div>`;
 
