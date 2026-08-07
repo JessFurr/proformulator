@@ -652,8 +652,9 @@ html.tq-print-prep .sky-bg{background:#fff!important;background-image:none!impor
         <tr style="background:#f8f8f8"><td style="padding:4px 8px;color:#555">SAFE conversion (cap)</td><td style="padding:4px 8px;font-family:monospace;color:#2a5a9a">MIN(cap ÷ pre-$ FD, round PPS)</td></tr>
         <tr><td style="padding:4px 8px;color:#555">SAFE conversion (discount rate)</td><td style="padding:4px 8px;font-family:monospace;color:#2a5a9a">round PPS × discount rate (e.g. 80% → PPS × 0.80)</td></tr>
         <tr style="background:#f8f8f8"><td style="padding:4px 8px;color:#555">Post-money valuation input</td><td style="padding:4px 8px;font-family:monospace;color:#2a5a9a">pre-money = post-money − round size</td></tr>
+        <tr><td style="padding:4px 8px;color:#555">Promised Options</td><td style="padding:4px 8px;font-family:monospace;color:#2a5a9a">included in pre-$ FD for both pre- and post-money SAFEs</td></tr>
       </table>
-      <p style="font-size:10px;color:#888;margin-top:8px">All PPS values display to 5 decimal places. SAFE conversions use the lower of cap PPS or discount PPS (standard NVCA mechanic). Pre-money FD shares should include any existing stock plan and any SAFEs converting at this round.</p>
+      <p style="font-size:10px;color:#888;margin-top:8px">All PPS values display to 5 decimal places. SAFE conversions use the lower of cap PPS or discount PPS (standard NVCA mechanic). Pre-money FD shares should include any existing stock plan and any SAFEs converting at this round. Promised Options — options promised but not yet formally granted — are treated as already outstanding for both pre- and post-money SAFEs, per YC's Company Capitalization definition; unlike the stock-plan increase, which only dilutes pre-money SAFEs.</p>
     </div>
 
     <div style="margin-bottom:16px">
@@ -771,7 +772,7 @@ html.tq-print-prep .sky-bg{background:#fff!important;background-image:none!impor
       <div class="pool-calc" id="poolCalcDisplay"></div>
       <div class="field" style="margin-top:7px;margin-bottom:0"><label>Issued Shares from Stock Plan</label>
         <div class="iw"><span class="ip">#</span><input type="text" inputmode="numeric" id="poolPreReserved" placeholder="500,000" oninput="nInput(this)" onblur="nBlur(this)" onfocus="nFocus(this)"></div></div>
-      <div class="field" style="margin-top:7px;margin-bottom:0"><label>Promised Options</label><span style="font-size:9px;color:var(--muted);display:block">promised, not yet granted — included in Company Capitalization</span>
+      <div class="field" style="margin-top:7px;margin-bottom:0"><label>Promised Options</label>
         <div class="iw"><span class="ip">#</span><input type="text" inputmode="numeric" id="promisedOptions" placeholder="0" oninput="nInput(this)" onblur="nBlur(this)" onfocus="nFocus(this)"></div></div>
       <div class="field" style="margin-top:7px;margin-bottom:0"><label>Existing Preferred Shares</label>
         <div class="iw"><span class="ip">#</span><input type="text" inputmode="numeric" id="existingPref" placeholder="0 if first preferred round" oninput="nInput(this)" onblur="nBlur(this)" onfocus="nFocus(this)"></div></div>
@@ -995,6 +996,17 @@ function updateQuickWire(el) {
   const amt = parseInt(raw,10), sh = roundD(amt/lastCalc.pps), wire = roundU2(lastCalc.pps*sh);
   out.textContent = `$${fmtDollar(wire)} (${sh.toLocaleString('en-US')} sh)`;
 }
+// Inline table-row inputs (e.g. Promised Options in the Simple Pro Forma table) — write through
+// to the canonical field they mirror, then run a normal debounced recalc (full re-render is fine
+// here, unlike the wire calculator, since this value legitimately changes every downstream number).
+function updateInlineNumeric(el, syncId) {
+  const raw = el.value.replace(/[^\d]/g,'');
+  const fmtVal = raw ? parseInt(raw,10).toLocaleString('en-US') : '';
+  el.value = fmtVal;
+  const canonical = document.getElementById(syncId);
+  if (canonical) canonical.value = fmtVal;
+  recalcDebounced();
+}
 const round0=n=>Math.round(n);
 
 
@@ -1052,12 +1064,20 @@ function recalc() {
 
     // Post-money SAFEs (inner loop)
     // Denominator = preFDBase + all SAFE shares (no pool increase, no new round) — matches YC post-money SAFE formula
+    // A post-money SAFE's cap must exceed its own investment amount (ownership = amount/cap must be < 100%,
+    // per YC's own guide: "Raising more than the Post-Money Valuation Cap would result in negative ownership
+    // for founders"). Without this guard, an invalid cap sends the fixed-point iteration below into runaway
+    // growth toward Infinity, which then poisons every downstream number in the whole tool.
     const postList=safes.filter(s=>s.type==='post'&&parseN(s.amount)>0);
-    if(postList.length){
+    const postInvalid=postList.filter(s=>{const cap=parseN(s.cap);return cap>0&&parseN(s.amount)>=cap;});
+    postInvalid.forEach(s=>flags.push(`${x(s.name)||'SAFE'}: investment ($${fmt(parseN(s.amount))}) exceeds its post-money cap ($${fmt(parseN(s.cap))}) — that's not a valid SAFE (ownership would exceed 100%). Excluded from the calculation until fixed.`));
+    const postValid=postList.filter(s=>!postInvalid.includes(s));
+    if(postInvalid.length) postInvalid.forEach(s=>iterResults.push({...s,amt:parseN(s.amount),safePPS:0,safeShares:0,basis:'Invalid — investment exceeds post-money cap'}));
+    if(postValid.length){
       let iterD=preFDBase+preSAFEShares;
       for(let i=0;i<100;i++){
         let postSh=0;
-        for(const s of postList){
+        for(const s of postValid){
           const cap=parseN(s.cap),disc=parseFloat(s.discount)||0;
           let sp=cap>0?cap/iterD:pps; if(disc>0)sp=Math.min(sp,pps*(disc/100));
           postSh+=parseN(s.amount)/sp;
@@ -1066,7 +1086,7 @@ function recalc() {
         if(Math.abs(newD-iterD)<0.5){iterD=newD;break;}
         iterD=newD;
       }
-      for(const s of postList){
+      for(const s of postValid){
         const amt=parseN(s.amount),cap=parseN(s.cap),disc=parseFloat(s.discount)||0;
         let safePPS=cap>0?round4(cap/iterD):pps,basis=cap>0?`Post-money cap $${fmt(cap)}`:'Round PPS';
         if(disc>0){const dp=round4(pps*(disc/100));if(dp<safePPS){safePPS=dp;basis=`Discount rate ${disc}% beats cap`;}}
@@ -1126,7 +1146,7 @@ function recalc() {
 
   // ── BUILD HTML ────────────────────────────────────────────────────────────
   let h='';
-  if(flags.length) h+=flags.map(f=>`<div class="flag warn"><span>⚠️</span> ${f}</div>`).join('');
+  if(flags.length) h+=[...new Set(flags)].map(f=>`<div class="flag warn"><span>⚠️</span> ${f}</div>`).join('');
 
   // Deal Summary strip — moved into Deal Mechanics card header
 
@@ -1248,11 +1268,13 @@ function recalc() {
   // preFDDenom excludes the pool increase on purpose — "% of FD post SAFE" is the checkpoint
   // right after SAFEs convert, before the plan top-up (shown later, in the ↑ to Plan column).
   const preFDDenom = preFDBase + totalSAFEShares;
-  const spfRow = ({lbl, dot, dotBorder, italic, indent, subtotal, preS, prePct, planInc, safeNewSh, inv, newSh, wire, pctFD, preFDPct, pctPS, prePctPS, pctSerX, delta}) => {
+  const spfRow = ({lbl, dot, dotBorder, italic, indent, subtotal, preS, prePct, planInc, safeNewSh, inv, newSh, wire, pctFD, preFDPct, pctPS, prePctPS, pctSerX, delta, inlineEditId, inlineSyncId}) => {
     const postSh = (preS||0) + (planInc||0) + (safeNewSh||0) + (newSh||0);
     const brd = dotBorder?`border:${dotBorder};`:'';
     const st = `${indent?'padding-left:24px;':''}${italic?'font-style:italic;color:var(--muted);':indent?'color:var(--text);':''}${subtotal?'font-weight:700':''}`;
-    const preSDisp  = preS>0?fmtSh(preS):'—';
+    const preSDisp  = inlineEditId
+      ? `<input type="text" inputmode="numeric" id="${inlineEditId}" value="${preS>0?fmtSh(preS):''}" placeholder="0" oninput="updateInlineNumeric(this,'${inlineSyncId}')" style="width:76px;text-align:right;font-family:inherit;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--card-bg);color:var(--text)">`
+      : preS>0?fmtSh(preS):'—';
     const prePDisp  = prePct>0?fmtPct(prePct):'—';
     const invDisp      = inv>0?'$'+fmt(inv):'—';
     const safeNewShDisp = (safeNewSh||0)>0?fmtSh(safeNewSh):'—';
@@ -1307,9 +1329,8 @@ function recalc() {
 
   // Promised Options — promised but ungranted; included in Company Capitalization for both
   // pre- and post-money SAFEs (per YC), so it's folded into preFDBase, not the pool-increase bucket.
-  if(promisedOpts>0){
-    spfHTML += spfRow({lbl:'Promised Options',dot:C_PROMISED,preS:promisedOpts,prePct:promisedOpts/(sharesO+pa+promisedOpts),preFDPct:promisedOpts/preFDDenom,inv:0,newSh:0,wire:0,pctFD:promisedOpts/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(promisedOpts/postFD)-(promisedOpts/(sharesO+pa+promisedOpts))});
-  }
+  // Always shown (not gated on >0) with an inline-editable # cell, mirrored to the left-panel field.
+  spfHTML += spfRow({lbl:'Promised Options',dot:C_PROMISED,preS:promisedOpts,prePct:promisedOpts/(sharesO+pa+promisedOpts),preFDPct:promisedOpts/preFDDenom,inv:0,newSh:0,wire:0,pctFD:promisedOpts/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(promisedOpts/postFD)-(promisedOpts/(sharesO+pa+promisedOpts)),inlineEditId:'promisedOptionsInline',inlineSyncId:'promisedOptions'});
 
   // SAFE investors
   safeResults.forEach(s=>{
@@ -1551,9 +1572,10 @@ function recalc() {
       trackedPre+=d.preShares;
     }
   });
-  const untrackedCommon=preFDBase-trackedPre-preReserved;
+  const untrackedCommon=preFDBase-trackedPre-preReserved-promisedOpts;
   if(untrackedCommon>0){bfSlices.push({pct:untrackedCommon,color:'#f5c518'});bfLegend.push({label:'Existing Holders',pct:untrackedCommon/preFDTotal,color:'#f5c518'});}
   if(preReserved>0){bfSlices.push({pct:preReserved,color:'#27b3e7'});bfLegend.push({label:'Stock Plan',pct:preReserved/preFDTotal,color:'#27b3e7'});}
+  if(promisedOpts>0){bfSlices.push({pct:promisedOpts,color:C_PROMISED});bfLegend.push({label:'Promised Options',pct:promisedOpts/preFDTotal,color:C_PROMISED});}
   const afSlices=[],afLegend=[];
   diCalc.forEach(d=>{
     if(d.preShares>0){
@@ -1565,6 +1587,7 @@ function recalc() {
   if(untrackedCommon>0){afSlices.push({pct:untrackedCommon,color:'#f5c518'});afLegend.push({label:'Existing Holders',pct:untrackedCommon/postFD,color:'#f5c518'});}
   const afPool=(preReserved||0)+(poolIncrease||0);
   if(afPool>0){afSlices.push({pct:afPool,color:'#27b3e7'});afLegend.push({label:'Stock Plan',pct:afPool/postFD,color:'#27b3e7'});}
+  if(promisedOpts>0){afSlices.push({pct:promisedOpts,color:C_PROMISED});afLegend.push({label:'Promised Options',pct:promisedOpts/postFD,color:C_PROMISED});}
   safeResults.forEach(s=>{if(s.safeShares>0){afSlices.push({pct:s.safeShares,color:'#27b3e7'});afLegend.push({label:s.name||'SAFE',pct:s.safeShares/postFD,color:'#27b3e7'});}});
   if(newRoundShares>0){afSlices.push({pct:newRoundShares,color:'#1e3a8a'});afLegend.push({label:'New investors',pct:newRoundShares/postFD,color:'#1e3a8a'});}
   const bfCenter=bfLegend.length===1?fmtPct(1):fmtPct(bfLegend[0].pct);
