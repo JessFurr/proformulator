@@ -1074,12 +1074,15 @@ function recalc() {
       const cap=parseN(s.cap),disc=parseFloat(s.discount)||0;
       // Cap denominator (pre-money SAFE) = preFDBase + pool increase, EXCLUDING other converting SAFEs
       // — matches YC's "Original Safe" Company Capitalization (pool increase included, other safes/notes excluded)
-      const capPPS=cap>0?round4(cap/(preFDBase+poolIncrease)):null,discPPS=disc>0?round4(pps*(disc/100)):null;
+      const capDenom=preFDBase+poolIncrease;
+      const capPPS=cap>0?round4(cap/capDenom):null,discPPS=disc>0?round4(pps*(disc/100)):null;
+      const capMath=capPPS?`$${fmt(cap)} ÷ ${fmtSh(capDenom)} shares = ${fmtPPS(capPPS)}`:'';
+      const discMath=discPPS?`${fmtPPS(pps)} round PPS × ${disc}% = ${fmtPPS(discPPS)}`:'';
       let safePPS,basis;
-      if(capPPS&&discPPS){safePPS=Math.min(capPPS,discPPS);basis=capPPS<=discPPS?`Cap wins (${fmtPPS(capPPS)})`:`Discount wins (${fmtPPS(discPPS)})`;}
-      else if(capPPS)    {safePPS=capPPS;basis=`Cap: $${fmt(cap)}`;}
-      else if(discPPS)   {safePPS=discPPS;basis=`${disc}% discount rate`;}
-      else               {safePPS=pps;basis='MFN / round PPS';}
+      if(capPPS&&discPPS){safePPS=Math.min(capPPS,discPPS);basis=capPPS<=discPPS?`Cap wins: ${capMath} (discount would be ${fmtPPS(discPPS)})`:`Discount wins: ${discMath} (cap would be ${fmtPPS(capPPS)})`;}
+      else if(capPPS)    {safePPS=capPPS;basis=`Cap: ${capMath}`;}
+      else if(discPPS)   {safePPS=discPPS;basis=`Discount: ${discMath}`;}
+      else               {safePPS=pps;basis=`MFN / round PPS (${fmtPPS(pps)})`;}
       iterResults.push({...s,amt,safePPS,safeShares:roundD(amt/safePPS),basis});
     }
     const preSAFEShares=iterResults.reduce((a,b)=>a+b.safeShares,0);
@@ -1110,8 +1113,13 @@ function recalc() {
       }
       for(const s of postValid){
         const amt=parseN(s.amount),cap=parseN(s.cap),disc=parseFloat(s.discount)||0;
-        let safePPS=cap>0?round4(cap/iterD):pps,basis=cap>0?`Post-money cap $${fmt(cap)}`:'Round PPS';
-        if(disc>0){const dp=round4(pps*(disc/100));if(dp<safePPS){safePPS=dp;basis=`Discount rate ${disc}% beats cap`;}}
+        let safePPS=cap>0?round4(cap/iterD):pps,basis=cap>0?`Post-money cap: $${fmt(cap)} ÷ ${fmtSh(iterD)} shares = ${fmtPPS(safePPS)}`:`Round PPS (${fmtPPS(pps)})`;
+        if(disc>0){
+          const dp=round4(pps*(disc/100));
+          const discMath=`Discount: ${fmtPPS(pps)} round PPS × ${disc}% = ${fmtPPS(dp)}`;
+          if(dp<safePPS){basis=cap>0?`${discMath} (beats cap ${fmtPPS(safePPS)})`:discMath;safePPS=dp;}
+          else if(cap>0){basis=`Post-money cap wins: $${fmt(cap)} ÷ ${fmtSh(iterD)} = ${fmtPPS(safePPS)} (discount would be ${fmtPPS(dp)})`;}
+        }
         iterResults.push({...s,amt,safePPS,safeShares:roundD(amt/safePPS),basis});
       }
     }
