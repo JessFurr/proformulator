@@ -996,17 +996,6 @@ function updateQuickWire(el) {
   const amt = parseInt(raw,10), sh = roundD(amt/lastCalc.pps), wire = roundU2(lastCalc.pps*sh);
   out.textContent = `$${fmtDollar(wire)} (${sh.toLocaleString('en-US')} sh)`;
 }
-// Inline table-row inputs (e.g. Promised Options in the Simple Pro Forma table) — write through
-// to the canonical field they mirror, then run a normal debounced recalc (full re-render is fine
-// here, unlike the wire calculator, since this value legitimately changes every downstream number).
-function updateInlineNumeric(el, syncId) {
-  const raw = el.value.replace(/[^\d]/g,'');
-  const fmtVal = raw ? parseInt(raw,10).toLocaleString('en-US') : '';
-  el.value = fmtVal;
-  const canonical = document.getElementById(syncId);
-  if (canonical) canonical.value = fmtVal;
-  recalcDebounced();
-}
 const round0=n=>Math.round(n);
 
 
@@ -1269,13 +1258,11 @@ function recalc() {
   // preFDDenom excludes the pool increase on purpose — "% of FD post SAFE" is the checkpoint
   // right after SAFEs convert, before the plan top-up (shown later, in the ↑ to Plan column).
   const preFDDenom = preFDBase + totalSAFEShares;
-  const spfRow = ({lbl, dot, dotBorder, italic, indent, subtotal, preS, prePct, planInc, safeNewSh, inv, newSh, wire, pctFD, preFDPct, pctPS, prePctPS, pctSerX, delta, inlineEditId, inlineSyncId}) => {
+  const spfRow = ({lbl, dot, dotBorder, italic, indent, subtotal, preS, prePct, planInc, safeNewSh, inv, newSh, wire, pctFD, preFDPct, pctPS, prePctPS, pctSerX, delta}) => {
     const postSh = (preS||0) + (planInc||0) + (safeNewSh||0) + (newSh||0);
     const brd = dotBorder?`border:${dotBorder};`:'';
     const st = `${indent?'padding-left:24px;':''}${italic?'font-style:italic;color:var(--muted);':indent?'color:var(--text);':''}${subtotal?'font-weight:700':''}`;
-    const preSDisp  = inlineEditId
-      ? `<input type="text" inputmode="numeric" id="${inlineEditId}" value="${preS>0?fmtSh(preS):''}" placeholder="0" oninput="updateInlineNumeric(this,'${inlineSyncId}')" style="width:76px;text-align:right;font-family:inherit;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--card-bg);color:var(--text)">`
-      : preS>0?fmtSh(preS):'—';
+    const preSDisp  = preS>0?fmtSh(preS):'—';
     const prePDisp  = prePct>0?fmtPct(prePct):'—';
     const invDisp      = inv>0?'$'+fmt(inv):'—';
     const safeNewShDisp = (safeNewSh||0)>0?fmtSh(safeNewSh):'—';
@@ -1365,7 +1352,7 @@ function recalc() {
     if(poolIssued>0){
       spfHTML += spfRow({lbl:'Issued',dot:C2,italic:true,indent:true,preS:poolIssued,prePct:poolIssued/(sharesO+pa),preFDPct:poolIssued/preFDDenom,planInc:0,inv:0,newSh:0,wire:0,pctFD:poolIssued/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(poolIssued/postFD)-(poolIssued/(sharesO+pa))});
     }
-    spfHTML += spfRow({lbl:'Promised',dot:C_PROMISED,italic:true,indent:true,preS:promisedOpts,prePct:promisedOpts/(sharesO+pa),preFDPct:promisedOpts/preFDDenom,planInc:0,inv:0,newSh:0,wire:0,pctFD:promisedOpts/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(promisedOpts/postFD)-(promisedOpts/(sharesO+pa)),inlineEditId:'promisedOptionsInline',inlineSyncId:'promisedOptions'});
+    spfHTML += spfRow({lbl:'Promised',dot:C_PROMISED,italic:true,indent:true,preS:promisedOpts,prePct:promisedOpts/(sharesO+pa),preFDPct:promisedOpts/preFDDenom,planInc:0,inv:0,newSh:0,wire:0,pctFD:promisedOpts/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(promisedOpts/postFD)-(promisedOpts/(sharesO+pa))});
   }
 
   // ── Totals ────────────────────────────────────────────────────────────────
