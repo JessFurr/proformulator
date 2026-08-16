@@ -1045,14 +1045,9 @@ function recalc() {
   let poolIncrease=0, preFDTotal=sharesO+otherHolders+pa, pps=round4(preMoney/(sharesO+otherHolders+pa));
   let newRoundShares=roundD(roundSize/pps), totalSAFEShares=0;
   const flags=[], safeResults=[];
-  // Flag (don't silently force a match) if the entered Available doesn't reconcile with Total Stock Plan
-  // minus Promised — only fires when Available was actually typed in (availInput>0).
-  if(availInput>0 && pa>0){
-    const reconciled=availInput+promisedOpts;
-    if(Math.abs(reconciled-pa)>0.5){
-      flags.push(`Total Stock Plan (${fmt(pa)}) doesn't match Available (${fmt(availInput)}) + Promised (${fmt(promisedOpts)}) = ${fmt(reconciled)}. Check your pool inputs.`);
-    }
-  }
+  // No reconciliation check between Available+Promised and Total Stock Plan: the real formula is
+  // Available = Reserved − Granted + Cancelled + Repurchased, so a mismatch is normal whenever there's
+  // any cancellation/repurchase history — not a data-entry error worth flagging.
 
   for(let master=0;master<100;master++){
     preFDTotal=sharesO+otherHolders+pa+poolIncrease;
