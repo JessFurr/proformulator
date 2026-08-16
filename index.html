@@ -1025,6 +1025,11 @@ function recalc() {
   // Plan represents only the unissued remaining pool (Available + Promised).
   const roundSize=pf('roundSize'),ourInvest=pf('ourInvest'),sharesO=pf('preFDShares'),otherHolders=pf('otherHolders'),promisedOpts=pf('promisedOptions');
   const preFDBase=sharesO+otherHolders+pf('poolAvail');
+  // Pricing basis (PPS only) excludes the unpromised "Available" slice of the stock plan — an
+  // unpromised, unissued reserve isn't real dilution yet. PPS = pre-money ÷ (outstanding + other
+  // holders + promised options + pool increase + SAFE shares). Ownership tracking (preFDBase/
+  // preFDTotal/postFD below) is untouched and still counts the full Total Stock Plan.
+  const pricingBase=sharesO+otherHolders+promisedOpts;
   const _rawVal=pf('preMoney');
   // Valuation mode: input may be pre-money or post-money
   const preMoney=valuationMode==='post'?Math.max(0,_rawVal-roundSize):_rawVal;
@@ -1042,7 +1047,7 @@ function recalc() {
   // falls back to computing it from Total Stock Plan − Promised when left blank/0.
   const availInput=pf('poolAvailForIssuance');
   const availableCredit=availInput>0?availInput:Math.max(0,pa-promisedOpts);
-  let poolIncrease=0, preFDTotal=sharesO+otherHolders+pa, pps=round4(preMoney/(sharesO+otherHolders+pa));
+  let poolIncrease=0, preFDTotal=sharesO+otherHolders+pa, pricingTotal=pricingBase, pps=round4(preMoney/pricingBase);
   let newRoundShares=roundD(roundSize/pps), totalSAFEShares=0;
   const flags=[], safeResults=[];
   // No reconciliation check between Available+Promised and Total Stock Plan: the real formula is
@@ -1051,11 +1056,12 @@ function recalc() {
 
   for(let master=0;master<100;master++){
     preFDTotal=sharesO+otherHolders+pa+poolIncrease;
-    // Pre-$:  preMoney / (preFDTotal + SAFEs)
-    // Post-$: postMoney / (preFDTotal + SAFEs + newRoundShares)  [full post-$ FD]
+    pricingTotal=pricingBase+poolIncrease;
+    // Pre-$:  preMoney / (pricingTotal + SAFEs)  — excludes unpromised Available pool shares
+    // Post-$: postMoney / (pricingTotal + SAFEs + newRoundShares)
     pps=valuationMode==='post'
-      ?round4(_rawVal/(preFDTotal+totalSAFEShares+newRoundShares))
-      :round4(preMoney/(preFDTotal+totalSAFEShares));
+      ?round4(_rawVal/(pricingTotal+totalSAFEShares+newRoundShares))
+      :round4(preMoney/(pricingTotal+totalSAFEShares));
     newRoundShares=roundD(roundSize/pps);
     // Pool targets full post-$ FD (preFDTotal + SAFEs + round shares)
     // Promised Options don't count toward the "already available" credit when sizing the pool top-up —
@@ -1142,15 +1148,20 @@ function recalc() {
   const postMoney=preMoney+roundSize;
   const postReserved=pa>0?pa+poolIncrease:null;
   const postFD=preFDTotal+totalSAFEShares+newRoundShares;
+  // Pricing-basis post-$ FD — the share count PPS was actually derived against (excludes the
+  // unpromised Available pool). This is what the money-math check below must reconcile against;
+  // postFD (above) includes Available for ownership-% purposes and will legitimately NOT satisfy
+  // postFD × pps = postMoney, since Available shares aren't "purchased" at the round price.
+  const pricingPostFD=pricingTotal+totalSAFEShares+newRoundShares;
 
   // ownership
   const existingPct=preFDBase/postFD,newPoolPct=poolIncrease/postFD;
   const safePct=totalSAFEShares/postFD,ourPct=ourShares/postFD,otherRndPct=otherShares/postFD;
 
   // checks
-  const c1v=postFD*pps, c1diff=Math.abs(c1v-postMoney);
+  const c1v=pricingPostFD*pps, c1diff=Math.abs(c1v-postMoney);
   // PPS is ROUND(x,4), so max residual per share = 0.00005 → allow that plus a $0.01 floor
-  const c1p=c1diff<=postFD*0.00005+0.01;
+  const c1p=c1diff<=pricingPostFD*0.00005+0.01;
   const c1note=c1diff>0.005?` — Δ$${fmtDollar(c1diff)} from ROUND(PPS,${ppsDec})`:' — exact';
   const c2v=roundSize/newRoundShares,c2p=Math.abs(round4(c2v)-pps)<0.0001;
   const c3v=roundSize/pps,c3p=Math.abs(c3v-newRoundShares)<1;
@@ -1159,7 +1170,7 @@ function recalc() {
   const C1='#f5c518',C2='#1e3a8a',C3='#7ec8e3',C4='#fff',C5='#27b3e7',C_POOL_NEW='#9bd5f5',C_PROMISED='#8e6bbf',C_OTHER='#c97b2e';
 
   // store for export
-  lastCalc={pps,newRoundShares,ourShares,otherShares,wireAmt,dividendRate,postMoney,postFD,preFDTotal,preFDBase,sharesO,otherHolders,pa,promisedOpts,poolIncrease,safeResults,totalSAFEShares,postReserved,preMoney,roundSize,ourInvest,effectiveOurInvest};
+  lastCalc={pps,newRoundShares,ourShares,otherShares,wireAmt,dividendRate,postMoney,postFD,preFDTotal,preFDBase,pricingTotal,pricingBase,sharesO,otherHolders,pa,promisedOpts,poolIncrease,safeResults,totalSAFEShares,postReserved,preMoney,roundSize,ourInvest,effectiveOurInvest};
 
   // ── BUILD HTML ────────────────────────────────────────────────────────────
   let h='';
@@ -1180,10 +1191,10 @@ function recalc() {
 
   // Deal Mechanics card
   const _abbr = n => n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':Math.round(n).toString();
-  const _denom = valuationMode==='post'?postFD:preFDTotal+totalSAFEShares;
+  const _denom = valuationMode==='post'?pricingPostFD:(pricingTotal+totalSAFEShares);
   const _fdParts = [`${fmtSh(sharesO)} outstanding`]
       .concat(otherHolders>0?[`${fmtSh(otherHolders)} other holders`]:[])
-      .concat(pa>0?[`${fmtSh(pa)} total stock plan${promisedOpts>0?` (incl. ${fmtSh(promisedOpts)} promised)`:''}`]:[])
+      .concat(promisedOpts>0?[`${fmtSh(promisedOpts)} promised options`]:[])
       .concat(poolIncrease>0?[`${fmtSh(poolIncrease)} new pool`]:[])
       .concat(totalSAFEShares>0?[`${fmtSh(totalSAFEShares)} SAFEs`]:[])
       .concat(valuationMode==='post'?[`${fmtSh(newRoundShares)} new shares`]:[]);
@@ -1194,10 +1205,10 @@ function recalc() {
       <div class="ds-cell"><div class="ds-label">+ Investment</div><div class="ds-val blue">${fmtM(roundSize)}</div></div>
       <div class="ds-cell"><div class="ds-label">= Post-Money</div><div class="ds-val green">${fmtM(postMoney)}</div></div>
     </div>
-    <div class="dr"><div class="dr-left"><div class="lbl">Price Per Share (PPS)</div><div class="sub">${valuationMode==='post'?`$${fmtSh(postMoney)} ÷ ${fmtSh(postFD)} post-$ FD`:`$${fmtSh(preMoney)} ÷ ${fmtSh(preFDTotal+totalSAFEShares)} pre-$ FD`}</div>${ppsMathDetail}</div><div class="dr-val blue" style="font-size:15px">${fmtPPS(pps)}</div></div>
+    <div class="dr"><div class="dr-left"><div class="lbl">Price Per Share (PPS)</div><div class="sub">$${fmtSh(valuationMode==='post'?postMoney:preMoney)} ÷ ${fmtSh(_denom)} ${valuationMode==='post'?'post':'pre'}-$ FD</div>${ppsMathDetail}</div><div class="dr-val blue" style="font-size:15px">${fmtPPS(pps)}</div></div>
     ${poolIncrease>0?`<div class="dr"><div class="dr-left"><div class="lbl">Pool Increase</div><div class="sub" style="font-size:9px">${(pf('poolPct')).toFixed(1)}% × ${fmtSh(postFD)} postFD − ${fmtSh(pa)} avail = ${fmtSh(poolIncrease)}</div></div><div class="dr-val">${fmtSh(poolIncrease)}</div></div>`:''}
     ${pa>0?`<div class="dr"><div class="dr-left"><div class="lbl">Total Stock Plan</div><div class="sub" style="font-size:9px">${poolIncrease>0?`${fmtSh(pa)} existing + ${fmtSh(poolIncrease)} increase`:`${fmtSh(pa)} (no increase)`}</div></div><div class="dr-val">${fmtSh(pa+poolIncrease)}</div></div>`:''}
-    <div class="dr"><div class="dr-left"><div class="lbl">Pre-Money Fully Diluted Shares</div><div class="sub" style="font-size:9px">excl. SAFE shares</div></div><div class="dr-val">${fmtSh(preFDTotal)}</div></div>
+    <div class="dr"><div class="dr-left"><div class="lbl">Pre-Money Fully Diluted Shares</div><div class="sub" style="font-size:9px">pricing basis — excl. Available pool, excl. SAFE shares</div></div><div class="dr-val">${fmtSh(pricingTotal)}</div></div>
     <div class="dr"><div class="dr-left"><div class="lbl">Post-Money Fully Diluted Shares</div></div><div class="dr-val">${fmtSh(postFD)}</div></div>
     <div class="dr"><div class="dr-left"><div class="lbl">Aggregate New Shares</div></div><div class="dr-val">${fmtSh(newRoundShares)}</div></div>
     ${effectiveOurInvest>0?`<div class="dr"><div class="dr-left"><div class="lbl">Our Shares</div></div><div class="dr-val green">${fmtSh(ourShares)}</div></div>
@@ -1473,7 +1484,7 @@ function recalc() {
         scenPostFD = preFDTotal + totalSAFEShares + roundD(roundSize / pps);
       } else if (factor === 'valuation') {
         const pm = scenValTyp === 'post' ? val - roundSize : val;
-        scenPPS = round4(pm / preFDTotal);
+        scenPPS = round4(pm / pricingTotal);
         scenOurShares = effectiveOurInvest > 0 ? roundD(effectiveOurInvest / scenPPS) : 0;
         scenOurWire = effectiveOurInvest > 0 ? roundU2(scenPPS * scenOurShares) : 0;
         const newSh = roundD(roundSize / scenPPS);
@@ -1488,7 +1499,7 @@ function recalc() {
       } else if (factor === 'poolpct') {
         const poolPctV = val / 100;
         const newPool = Math.max(0, round0(poolPctV * (preFDBase + roundD(roundSize / pps))) - pf('poolAvail'));
-        const newPrFD = preFDBase + newPool;
+        const newPrFD = pricingBase + newPool;
         scenPPS = round4(preMoney / newPrFD);
         scenOurShares = effectiveOurInvest > 0 ? roundD(effectiveOurInvest / scenPPS) : 0;
         scenOurWire = effectiveOurInvest > 0 ? roundU2(scenPPS * scenOurShares) : 0;
@@ -1548,7 +1559,7 @@ function recalc() {
 
   // Checks
   h+=`<div class="card" data-bid="checks"><div class="card-title">Checks</div>`;
-  h+=chk(c1p,`FD Post-$ × PPS = Post-Money${c1note}`,`${fmtSh(postFD)} × ${fmtPPS(pps)} = ${fmtM(c1v)} (target: ${fmtM(postMoney)})`);
+  h+=chk(c1p,`Pricing FD Post-$ × PPS = Post-Money${c1note}`,`${fmtSh(pricingPostFD)} × ${fmtPPS(pps)} = ${fmtM(c1v)} (target: ${fmtM(postMoney)})`);
   h+=chk(c2p,'Total Investment ÷ Total Shares = PPS',`$${fmt(roundSize)} ÷ ${fmtSh(newRoundShares)} = ${fmtPPS(round4(c2v))} (target: ${fmtPPS(pps)})`);
   h+=chk(c3p,'Total New Money ÷ PPS = Aggregate Shares',`$${fmt(roundSize)} ÷ ${fmtPPS(pps)} = ${fmtSh(Math.round(c3v))} (target: ${fmtSh(newRoundShares)})`);
   // Per-SAFE cap check (pre-money only): SAFE $ ÷ Cap should equal SAFE shares ÷ (pre-$ FD + pool increase) —
@@ -1660,7 +1671,8 @@ function buildReportHTML() {
   });
 
   // Checks
-  const c1v=c.postFD*c.pps, c1p=Math.abs(c1v-c.postMoney)<=c.postFD*0.00005+0.01;
+  const pricingPostFD=c.pricingTotal+c.totalSAFEShares+c.newRoundShares;
+  const c1v=pricingPostFD*c.pps, c1p=Math.abs(c1v-c.postMoney)<=pricingPostFD*0.00005+0.01;
   const c1note=Math.abs(c1v-c.postMoney)>0.005?` — Δ$${Math.abs(c1v-c.postMoney).toFixed(2)} from ROUND(PPS,${ppsDec})`:'';
   const c2v=c.roundSize/c.newRoundShares, c2p=Math.abs(round4(c2v)-c.pps)<0.0001;
   const c3v=c.roundSize/c.pps, c3p=Math.abs(Math.round(c3v)-c.newRoundShares)<=1;
@@ -1850,7 +1862,7 @@ tr.total td:first-child{text-align:left;padding:3px 5px}
 </table>
 
 <div style="font-size:7.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5a7a9a;padding-bottom:3px;margin-top:8px;margin-bottom:2px;border-bottom:1px solid #d8e8f0">Verification Checks</div>
-${chkRow(c1p,`FD Post-$ × PPS = Post-Money${c1note}`,`${rSh(c.postFD)} × ${rPPS_(c.pps)} = ${rM(c1v)} (target: ${rM(c.postMoney)})`)}
+${chkRow(c1p,`Pricing FD Post-$ × PPS = Post-Money${c1note}`,`${rSh(pricingPostFD)} × ${rPPS_(c.pps)} = ${rM(c1v)} (target: ${rM(c.postMoney)})`)}
 ${chkRow(c2p,'Total Investment ÷ Total Shares = PPS',`$${Math.round(c.roundSize).toLocaleString('en-US')} ÷ ${rSh(c.newRoundShares)} = ${rPPS_(round4(c2v))} (target: ${rPPS_(c.pps)})`)}
 ${chkRow(c3p,'Total New Money ÷ PPS = Aggregate Shares',`$${Math.round(c.roundSize).toLocaleString('en-US')} ÷ ${rPPS_(c.pps)} = ${rSh(Math.round(c3v))} (target: ${rSh(c.newRoundShares)})`)}
 
@@ -1874,7 +1886,7 @@ function doPrint() {
 function exportExcel() {
   if (!lastCalc) { alert('Run a calculation first.'); return; }
   if (typeof XLSX === 'undefined') { alert('SheetJS not loaded — check internet connection.'); return; }
-  const {pps,newRoundShares,ourShares,otherShares,wireAmt,dividendRate,postMoney,postFD,preFDTotal,preFDBase,sharesO,otherHolders,pa,promisedOpts,poolIncrease,safeResults,totalSAFEShares,preMoney,roundSize,ourInvest} = lastCalc;
+  const {pps,newRoundShares,ourShares,otherShares,wireAmt,dividendRate,postMoney,postFD,preFDTotal,preFDBase,pricingTotal,sharesO,otherHolders,pa,promisedOpts,poolIncrease,safeResults,totalSAFEShares,preMoney,roundSize,ourInvest} = lastCalc;
   const divPct = (parseFloat(document.getElementById('dividendRatePct')?.value) || 6) / 100;
 
   const wb = XLSX.utils.book_new();
@@ -1905,7 +1917,7 @@ function exportExcel() {
   ws1['B4']={v:roundSize,t:'n',z:'$#,##0'};
   ws1['A5']={v:'Our Investment',t:'s'};
   ws1['B5']={v:ourInvest,t:'n',z:'$#,##0'};
-  ws1['A6']={v:'Pre-Money FD Shares (excl. stock plan)',t:'s'};
+  ws1['A6']={v:'Shares Outstanding (excl. outstanding options)',t:'s'};
   ws1['B6']={v:sharesO,t:'n',z:'#,##0'};
   ws1['A7']={v:'Total Stock Plan',t:'s'};
   ws1['B7']={v:pa,t:'n',z:'#,##0'};
@@ -1915,6 +1927,8 @@ function exportExcel() {
   ws1['B9']={v:totalSAFEShares,t:'n',z:'#,##0'};
   ws1['A10']={v:'Other Holders (e.g. outstanding options)',t:'s'};
   ws1['B10']={v:otherHolders,t:'n',z:'#,##0'};
+  ws1['A11']={v:'Promised Options',t:'s'};
+  ws1['B11']={v:promisedOpts,t:'n',z:'#,##0'};
 
   // Formula cells (col D+E, rows 3-12)
   // Pre-money derived from mode
@@ -1925,8 +1939,8 @@ function exportExcel() {
   ws1['D4']={v:'Post-Money',t:'s'};
   setF(ws1,'E4',postMoney,'=E3+B4','$#,##0');
 
-  ws1['D5']={v:'Pre-$ FD (excl. SAFEs)',t:'s'};
-  setF(ws1,'E5',preFDTotal,'=B6+B7+B8+B10','#,##0');
+  ws1['D5']={v:'Pre-$ FD for Pricing (excl. Available pool, excl. SAFEs)',t:'s'};
+  setF(ws1,'E5',pricingTotal,'=B6+B10+B11+B8','#,##0');
 
   ws1['D6']={v:'Price Per Share (PPS)',t:'s'};
   setF(ws1,'E6',pps,`=ROUND(E3/(E5+B9),${ppsDec})`,'"$"0.0000');
@@ -1934,8 +1948,8 @@ function exportExcel() {
   ws1['D7']={v:'Aggregate New Shares',t:'s'};
   setF(ws1,'E7',newRoundShares,'=ROUNDDOWN(B4/E6,0)','#,##0');
 
-  ws1['D8']={v:'Post-$ FD Shares',t:'s'};
-  setF(ws1,'E8',postFD,'=E5+B9+E7','#,##0');
+  ws1['D8']={v:'Post-$ FD Shares (total, incl. Available pool)',t:'s'};
+  setF(ws1,'E8',postFD,'=B6+B7+B8+B9+B10+E7','#,##0');
 
   if(ourInvest>0){
     ws1['D9']={v:'Our Shares',t:'s'};
