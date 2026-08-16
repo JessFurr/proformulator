@@ -1558,13 +1558,15 @@ function recalc() {
   h+=chk(c2p,'Total Investment ÷ Total Shares = PPS',`$${fmt(roundSize)} ÷ ${fmtSh(newRoundShares)} = ${fmtPPS(round4(c2v))} (target: ${fmtPPS(pps)})`);
   h+=chk(c3p,'Total New Money ÷ PPS = Aggregate Shares',`$${fmt(roundSize)} ÷ ${fmtPPS(pps)} = ${fmtSh(Math.round(c3v))} (target: ${fmtSh(newRoundShares)})`);
   // Manual cross-check against Carta's own pre-money fully diluted share count (optional — only
-  // shown when Jess types a number in). Compares against preFDBase, which excludes this round's
-  // pool increase and SAFE shares since neither exists in Carta's cap table yet.
+  // shown when Jess types a number in). Carta won't reflect Promised Options (not formally granted
+  // yet, so Carta has no record of them) or this round's pool increase/SAFEs — back those out of
+  // preFDBase before comparing.
   const cartaFD = pf('cartaFD');
   if (cartaFD>0) {
-    const cartaDiff = Math.abs(preFDBase-cartaFD);
-    const cartaPass = cartaDiff <= Math.max(1, preFDBase*0.0005);
-    h+=chk(cartaPass, 'Pre-Money FD Shares vs. Carta', `${fmtSh(preFDBase)} computed = ${fmtSh(cartaFD)} per Carta${cartaPass?'':` — Δ${fmtSh(cartaDiff)} shares`}`);
+    const cartaComparable = preFDBase-promisedOpts;
+    const cartaDiff = Math.abs(cartaComparable-cartaFD);
+    const cartaPass = cartaDiff <= Math.max(1, cartaComparable*0.0005);
+    h+=chk(cartaPass, 'Pre-Money FD Shares vs. Carta (excl. Promised)', `${fmtSh(cartaComparable)} computed = ${fmtSh(cartaFD)} per Carta${cartaPass?'':` — Δ${fmtSh(cartaDiff)} shares`}`);
   }
   // Per-SAFE cap check (pre-money only): SAFE $ ÷ Cap should equal SAFE shares ÷ (pre-$ FD + pool increase) —
   // this is the pre-money SAFE's own Company Capitalization basis, which excludes other converting SAFEs (per YC).
