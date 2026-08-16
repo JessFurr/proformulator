@@ -1173,8 +1173,15 @@ function recalc() {
   // Deal Summary strip — moved into Deal Mechanics card header
 
   // Build cap table HTML
+  const existingPref = pf('existingPref');
+  const commonSh = sharesO - existingPref;
   let ctHTML=`<div class="ct-row hdr"><span>Holder</span><span class="ct-sh">Shares</span><span class="ct-pct">% FD</span></div>`;
-  ctHTML+=ctRow('Existing Holders',sharesO,sharesO/postFD,C1);
+  if(existingPref>0){
+    if(commonSh>0) ctHTML+=ctRow('Existing Common',commonSh,commonSh/postFD,'#e05a7a');
+    ctHTML+=ctRow('Existing Preferred',existingPref,existingPref/postFD,'#f5c518');
+  } else {
+    ctHTML+=ctRow('Existing Holders',sharesO,sharesO/postFD,C1);
+  }
   if(poolIncrease>0) ctHTML+=ctRow('New stock plan',poolIncrease,poolIncrease/postFD,C_POOL_NEW);
   safeResults.forEach(s=>ctHTML+=ctRow(x(s.name)||'SAFE investor',s.safeShares,s.safeShares/postFD,C5));
   if(effectiveOurInvest>0){
@@ -1249,7 +1256,6 @@ function recalc() {
   });
 
   // 12 columns: Holder | Pre-$ Shares | Pre-$ % | Investment $ | New Shares | Post-$ Shares | Wire Amount | % FD | % of PS | Δ % of PS | % of Series X | Δ Dilution
-  const existingPref = pf('existingPref');
   // totalPreferred = existing preferred from prior rounds + SAFEs converting + new round shares
   const totalPreferred = existingPref + totalSAFEShares + newRoundShares;
   // preTotalPreferred = preferred outstanding BEFORE this round (for Δ % of PS)
@@ -1340,7 +1346,6 @@ function recalc() {
   // Existing holders: prePctPS = 1.0 (100%) if they held all prior preferred, shrinks after round
   const existingPrePctPS = existingPref>0 && preTotalPreferred>0 ? existingPref/preTotalPreferred : 0;
   if(existingPref>0){
-    const commonSh = sharesO - existingPref;
     if(commonSh>0) spfHTML += spfRow({lbl:'Existing Common',dot:'#e05a7a',dotBorder:'1px solid #e05a7a',preS:commonSh,prePct:commonSh/(preFDBase),preFDPct:commonSh/preFDDenom,inv:0,newSh:0,wire:0,pctFD:commonSh/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(commonSh/postFD)-(commonSh/(preFDBase))});
     spfHTML += spfRow({lbl:'Existing Preferred',dot:'#f5c518',preS:existingPref,prePct:existingPref/(preFDBase),preFDPct:existingPref/preFDDenom,inv:0,newSh:0,wire:0,pctFD:existingPref/postFD,pctPS:totalPreferred>0?existingPref/totalPreferred:0,prePctPS:existingPrePctPS,pctSerX:0,delta:(existingPref/postFD)-(existingPref/(preFDBase))});
   } else {
@@ -1604,10 +1609,13 @@ function recalc() {
       trackedPre+=d.preShares;
     }
   });
-  const untrackedCommon=preFDBase-trackedPre-pa-otherHolders;
-  if(untrackedCommon>0){bfSlices.push({pct:untrackedCommon,color:'#f5c518'});bfLegend.push({label:'Existing Holders',pct:untrackedCommon/preFDTotal,color:'#f5c518'});}
+  // Leftover common = commonSh (sharesO minus existing preferred) minus whatever's already tracked
+  // via named diluters. Existing Preferred gets its own slice — never lumped into "Existing Holders".
+  const untrackedCommon=commonSh-trackedPre;
+  if(untrackedCommon>0){bfSlices.push({pct:untrackedCommon,color:'#e05a7a'});bfLegend.push({label:'Existing Common',pct:untrackedCommon/preFDTotal,color:'#e05a7a'});}
+  if(existingPref>0){bfSlices.push({pct:existingPref,color:'#f5c518'});bfLegend.push({label:'Existing Preferred',pct:existingPref/preFDTotal,color:'#f5c518'});}
   if(otherHolders>0){bfSlices.push({pct:otherHolders,color:C_OTHER});bfLegend.push({label:'Other Holders',pct:otherHolders/preFDTotal,color:C_OTHER});}
-  if(pa>0){bfSlices.push({pct:pa,color:'#27b3e7'});bfLegend.push({label:'Stock Plan',pct:pa/preFDTotal,color:'#27b3e7'});}
+  if(pa>0){bfSlices.push({pct:pa,color:'#27b3e7'});bfLegend.push({label:'Stock Plan (reference)',pct:pa/preFDTotal,color:'#27b3e7'});}
   const afSlices=[],afLegend=[];
   diCalc.forEach(d=>{
     if(d.preShares>0){
@@ -1616,10 +1624,11 @@ function recalc() {
       afLegend.push({label:d.name||'Existing Holders',pct:postSh/postFD,color:d._color});
     }
   });
-  if(untrackedCommon>0){afSlices.push({pct:untrackedCommon,color:'#f5c518'});afLegend.push({label:'Existing Holders',pct:untrackedCommon/postFD,color:'#f5c518'});}
+  if(untrackedCommon>0){afSlices.push({pct:untrackedCommon,color:'#e05a7a'});afLegend.push({label:'Existing Common',pct:untrackedCommon/postFD,color:'#e05a7a'});}
+  if(existingPref>0){afSlices.push({pct:existingPref,color:'#f5c518'});afLegend.push({label:'Existing Preferred',pct:existingPref/postFD,color:'#f5c518'});}
   if(otherHolders>0){afSlices.push({pct:otherHolders,color:C_OTHER});afLegend.push({label:'Other Holders',pct:otherHolders/postFD,color:C_OTHER});}
   const afPool=(pa||0)+(poolIncrease||0);
-  if(afPool>0){afSlices.push({pct:afPool,color:'#27b3e7'});afLegend.push({label:'Stock Plan',pct:afPool/postFD,color:'#27b3e7'});}
+  if(afPool>0){afSlices.push({pct:afPool,color:'#27b3e7'});afLegend.push({label:'Stock Plan (reference)',pct:afPool/postFD,color:'#27b3e7'});}
   safeResults.forEach(s=>{if(s.safeShares>0){afSlices.push({pct:s.safeShares,color:'#27b3e7'});afLegend.push({label:s.name||'SAFE',pct:s.safeShares/postFD,color:'#27b3e7'});}});
   if(newRoundShares>0){afSlices.push({pct:newRoundShares,color:'#1e3a8a'});afLegend.push({label:'New investors',pct:newRoundShares/postFD,color:'#1e3a8a'});}
   const bfCenter=bfLegend.length===1?fmtPct(1):fmtPct(bfLegend[0].pct);
