@@ -770,8 +770,10 @@ html.tq-print-prep .sky-bg{background:#fff!important;background-image:none!impor
       <div class="field" style="margin-bottom:0"><label>Total Stock Plan</label>
         <div class="iw"><span class="ip">#</span><input type="text" inputmode="numeric" id="poolAvail" placeholder="500,000" oninput="nInput(this)" onblur="nBlur(this)" onfocus="nFocus(this)"></div></div>
       <div class="pool-calc" id="poolCalcDisplay"></div>
-      <div class="field" style="margin-top:7px;margin-bottom:0"><label>Issued Shares from Stock Plan</label>
+      <div class="field" style="margin-top:7px;margin-bottom:0"><label>Options and RSUs Issued and Outstanding</label>
         <div class="iw"><span class="ip">#</span><input type="text" inputmode="numeric" id="poolPreReserved" placeholder="500,000" oninput="nInput(this)" onblur="nBlur(this)" onfocus="nFocus(this)"></div></div>
+      <div class="field" style="margin-top:7px;margin-bottom:0"><label>Shares Available for Issuance Under the Plan</label>
+        <div class="iw"><span class="ip">#</span><input type="text" inputmode="numeric" id="poolAvailForIssuance" placeholder="e.g. 400,000" oninput="nInput(this)" onblur="nBlur(this)" onfocus="nFocus(this)"></div></div>
       <div class="field" style="margin-top:7px;margin-bottom:0"><label>Promised Options</label>
         <div class="iw"><span class="ip">#</span><input type="text" inputmode="numeric" id="promisedOptions" placeholder="0" oninput="nInput(this)" onblur="nBlur(this)" onfocus="nFocus(this)"></div></div>
       <div class="field" style="margin-top:7px;margin-bottom:0"><label>Existing Preferred Shares</label>
@@ -893,13 +895,29 @@ function removeSafe(id) { safes=safes.filter(s=>s.id!==id); renderSafes(); recal
 function updateSafe(id,f,v) { const s=safes.find(s=>s.id===id); if(s){s[f]=v;recalc();save();} }
 function setSafeType(id,t) { const s=safes.find(s=>s.id===id); if(!s)return; s.type=t; document.querySelectorAll(`[data-stype="${id}"]`).forEach(b=>b.classList.toggle('active',b.dataset.stypeVal===t)); recalc(); save(); }
 function nSafe(el,id,f) {
-  const end=el.selectionEnd,old=el.value.length,raw=el.value.replace(/[^\d]/g,'');
-  if(!raw){el.value='';updateSafe(id,f,'');return;}
-  const fmt=parseInt(raw,10).toLocaleString('en-US');
+  const end=el.selectionEnd,old=el.value.length;
+  // Keep digits and at most one decimal point, truncated to 2 decimal places — allows cents (e.g. 500,000.50).
+  let raw=el.value.replace(/[^\d.]/g,'');
+  const firstDot=raw.indexOf('.');
+  if(firstDot!==-1) raw=raw.slice(0,firstDot+1)+raw.slice(firstDot+1).replace(/\./g,'').slice(0,2);
+  if(!raw||raw==='.'){el.value='';updateSafe(id,f,'');return;}
+  const dotIdx=raw.indexOf('.');
+  const intPart=dotIdx===-1?raw:raw.slice(0,dotIdx);
+  const decPart=dotIdx===-1?null:raw.slice(dotIdx+1);
+  const fmtInt=(parseInt(intPart,10)||0).toLocaleString('en-US');
+  const fmt=decPart===null?fmtInt:`${fmtInt}.${decPart}`;
   el.value=fmt; try{el.setSelectionRange(Math.max(0,end+(fmt.length-old)),Math.max(0,end+(fmt.length-old)));}catch(e){}
   updateSafe(id,f,raw);
 }
-function nSafeBlur(el,id,f) { const r=el.value.replace(/[^\d]/g,''); if(r){el.value=parseInt(r,10).toLocaleString('en-US');updateSafe(id,f,r);} }
+function nSafeBlur(el,id,f) {
+  const raw=el.value.replace(/[^\d.]/g,'');
+  if(!raw||raw==='.') return;
+  const num=parseFloat(raw);
+  if(isNaN(num)) return;
+  const hadDecimal=raw.includes('.');
+  el.value=num.toLocaleString('en-US',{minimumFractionDigits:hadDecimal?2:0,maximumFractionDigits:2});
+  updateSafe(id,f,String(num));
+}
 function renderSafes() {
   document.getElementById('safeCount').textContent=safes.length?`(${safes.length})`:'';
   document.getElementById('safeList').innerHTML=safes.map(s=>`
@@ -1020,9 +1038,21 @@ function recalc() {
   // ── Master iterative solve ────────────────────────────────────────────────
   // Co-solves pool, PPS, and all SAFE conversions in one loop until convergence.
   const pp=pf('poolPct')/100, pa=pf('poolAvail'), poolIssuedPre=pf('poolPreReserved');
+  // "Shares Available for Issuance" is a direct input (real number off the cap table) when provided;
+  // falls back to computing it from Total Stock Plan − Issued − Promised when left blank/0.
+  const availInput=pf('poolAvailForIssuance');
+  const availableCredit=availInput>0?availInput:Math.max(0,pa-poolIssuedPre-promisedOpts);
   let poolIncrease=0, preFDTotal=sharesO+pa, pps=round4(preMoney/(sharesO+pa));
   let newRoundShares=roundD(roundSize/pps), totalSAFEShares=0;
   const flags=[], safeResults=[];
+  // Flag (don't silently force a match) if the entered Available doesn't reconcile with Total Stock Plan
+  // minus Issued and Promised — only fires when Available was actually typed in (availInput>0).
+  if(availInput>0 && pa>0){
+    const reconciled=poolIssuedPre+availInput+promisedOpts;
+    if(Math.abs(reconciled-pa)>0.5){
+      flags.push(`Total Stock Plan (${fmt(pa)}) doesn't match Issued (${fmt(poolIssuedPre)}) + Available (${fmt(availInput)}) + Promised (${fmt(promisedOpts)}) = ${fmt(reconciled)}. Check your pool inputs.`);
+    }
+  }
 
   for(let master=0;master<100;master++){
     preFDTotal=sharesO+pa+poolIncrease;
@@ -1035,7 +1065,7 @@ function recalc() {
     // Pool targets full post-$ FD (preFDTotal + SAFEs + round shares)
     // Promised Options don't count toward the "already available" credit when sizing the pool top-up —
     // they're spoken for even though not formally granted, same treatment as Issued (matches Naveen's model).
-    const newPool=pp>0?Math.max(0,round0(pp*(preFDTotal+totalSAFEShares+newRoundShares)-(pa-poolIssuedPre-promisedOpts))):0;
+    const newPool=pp>0?Math.max(0,round0(pp*(preFDTotal+totalSAFEShares+newRoundShares)-availableCredit)):0;
 
     // Pre-money SAFEs
     const iterResults=[];
@@ -1337,15 +1367,16 @@ function recalc() {
   }
 
   // Stock plan / pool — single combined row (last)
-  // Promised Options is a breakdown of THIS pool (like Issued), not a separate bucket — so the truly-free
-  // "Available" slice excludes both, and the three sub-rows (Available + Issued + Promised) sum back to pa.
+  // Promised Options is a breakdown of THIS pool (like Issued), not a separate bucket. "Available" uses
+  // availableCredit (the direct input when provided, else derived) — same value used in the pool-increase
+  // calc above. Total Stock Plan's own row shows the actual pa input, not a re-sum of the breakdown, so a
+  // mismatch between them (if Available/Issued/Promised don't reconcile to Total Stock Plan) surfaces as
+  // the flag below rather than a silently-adjusted number.
   const poolIssued = pf('poolPreReserved');
   if(pa>0||poolIncrease>0||poolIssued>0||promisedOpts>0){
-    const poolAvailToIssue = Math.max(0, pa - poolIssued - promisedOpts);
+    const poolAvailToIssue = availableCredit;
     const postAvail = poolAvailToIssue + poolIncrease;
-    const totalPrePool = poolAvailToIssue + poolIssued + promisedOpts;
-    const totalPostPool = postAvail + poolIssued + promisedOpts;
-    spfHTML += spfRow({lbl:'Total Stock Plan',dot:C2,italic:false,subtotal:true,preS:totalPrePool,prePct:totalPrePool>0?totalPrePool/(sharesO+pa):0,preFDPct:totalPrePool/preFDDenom,planInc:poolIncrease,inv:0,newSh:0,wire:0,pctFD:totalPostPool/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(totalPostPool/postFD)-(totalPrePool>0?totalPrePool/(sharesO+pa):0)});
+    spfHTML += spfRow({lbl:'Total Stock Plan',dot:C2,italic:false,subtotal:true,preS:pa,prePct:pa>0?pa/(sharesO+pa):0,preFDPct:pa/preFDDenom,planInc:poolIncrease,inv:0,newSh:0,wire:0,pctFD:(pa+poolIncrease)/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:((pa+poolIncrease)/postFD)-(pa>0?pa/(sharesO+pa):0)});
     if(poolAvailToIssue>0||poolIncrease>0){
       spfHTML += spfRow({lbl:'Available',dot:C2,italic:true,indent:true,preS:poolAvailToIssue,prePct:poolAvailToIssue>0?poolAvailToIssue/(sharesO+pa):0,preFDPct:poolAvailToIssue/preFDDenom,planInc:poolIncrease,inv:0,newSh:0,wire:0,pctFD:postAvail/postFD,pctPS:0,prePctPS:0,pctSerX:0,delta:(postAvail/postFD)-(poolAvailToIssue>0?poolAvailToIssue/(sharesO+pa):0)});
     }
@@ -2008,7 +2039,7 @@ const fmtDollar=n=>n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFrac
 // ─── PERSIST ──────────────────────────────────────────────────────────────────
 function save() {
   const vals={};
-  ['preMoney','roundSize','ourInvest','preFDShares','poolPct','poolAvail','poolPreReserved','promisedOptions','existingPref','dividendRatePct','scenA','scenB'].forEach(id=>{const el=document.getElementById(id);if(el)vals[id]=el.value;});
+  ['preMoney','roundSize','ourInvest','preFDShares','poolPct','poolAvail','poolPreReserved','poolAvailForIssuance','promisedOptions','existingPref','dividendRatePct','scenA','scenB'].forEach(id=>{const el=document.getElementById(id);if(el)vals[id]=el.value;});
   const scenFactorEl=document.getElementById('scenFactor'); if(scenFactorEl)vals.scenFactor=scenFactorEl.value;
   try{localStorage.setItem(LS,JSON.stringify({...vals,scenValTyp,safes,safeCounter,diluters,diluterCounter}));}catch(e){}
 }
@@ -2016,7 +2047,7 @@ function load() {
   try{
     const raw=localStorage.getItem(LS);if(!raw)return;
     const s=JSON.parse(raw);
-    ['preMoney','roundSize','ourInvest','preFDShares','poolPct','poolAvail','poolPreReserved','promisedOptions','existingPref','dividendRatePct','scenA','scenB'].forEach(id=>{const el=document.getElementById(id);if(el&&s[id])el.value=s[id];});
+    ['preMoney','roundSize','ourInvest','preFDShares','poolPct','poolAvail','poolPreReserved','poolAvailForIssuance','promisedOptions','existingPref','dividendRatePct','scenA','scenB'].forEach(id=>{const el=document.getElementById(id);if(el&&s[id])el.value=s[id];});
     if(s.scenFactor){const el=document.getElementById('scenFactor');if(el)el.value=s.scenFactor;}
     if(s.scenValTyp){scenValTyp=s.scenValTyp;}
     if(Array.isArray(s.safes)&&s.safes.length){safes=s.safes;safeCounter=s.safeCounter||safes.reduce((m,s)=>Math.max(m,s.id),0);renderSafes();}
@@ -2026,7 +2057,7 @@ function load() {
   }catch(e){}
 }
 function clearAll(){
-  ['preMoney','roundSize','ourInvest','preFDShares','poolPct','poolAvail','poolPreReserved','promisedOptions','existingPref','dividendRatePct','scenA','scenB'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['preMoney','roundSize','ourInvest','preFDShares','poolPct','poolAvail','poolPreReserved','poolAvailForIssuance','promisedOptions','existingPref','dividendRatePct','scenA','scenB'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   safes=[];safeCounter=0;diluters=[];diluterCounter=0;
   renderSafes();renderDiluters();updateScenLabels();recalc();
   try{localStorage.removeItem(LS);}catch(e){}
