@@ -762,7 +762,7 @@ html.tq-print-prep .sky-bg{background:#fff!important;background-image:none!impor
 
   <div class="card">
     <div class="card-title">Pre-money cap table</div>
-    <div class="field"><label>Shares Outstanding <span class="opt">(common, excluding outstanding options)</span></label>
+    <div class="field"><label>Shares Outstanding <span class="opt">(common and preferred, excluding outstanding options)</span></label>
       <div class="iw"><span class="ip">#</span><input type="text" inputmode="numeric" id="preFDShares" placeholder="10,000,000" oninput="nInput(this)" onblur="nBlur(this)" onfocus="nFocus(this)"></div></div>
     <div class="field" style="margin-top:7px"><label>Other Holders <span class="opt">(outstanding options)</span></label>
       <div class="iw"><span class="ip">#</span><input type="text" inputmode="numeric" id="otherHolders" placeholder="0" oninput="nInput(this)" onblur="nBlur(this)" onfocus="nFocus(this)"></div></div>
@@ -1022,7 +1022,8 @@ const round0=n=>Math.round(n);
 // ─── MAIN CALC ────────────────────────────────────────────────────────────────
 function recalc() {
   save();
-  // Shares Outstanding is common only. Total Stock Plan is the plan's GROSS reserve — it already
+  // Shares Outstanding is common + preferred combined (existingPref is carved back out of it for
+  // display, not added on top). Total Stock Plan is the plan's GROSS reserve — it already
   // contains whatever's sitting in Other Holders (issued/outstanding options), so it is never summed
   // directly into the FD count. It exists only as a reference figure (to cross-check against Carta)
   // and as a fallback source for Available when that isn't entered directly. Available itself is a
@@ -1939,7 +1940,7 @@ function exportExcel() {
   ws1['B4']={v:roundSize,t:'n',z:'$#,##0'};
   ws1['A5']={v:'Our Investment',t:'s'};
   ws1['B5']={v:ourInvest,t:'n',z:'$#,##0'};
-  ws1['A6']={v:'Shares Outstanding (excl. outstanding options)',t:'s'};
+  ws1['A6']={v:'Shares Outstanding (common and preferred, excl. outstanding options)',t:'s'};
   ws1['B6']={v:sharesO,t:'n',z:'#,##0'};
   ws1['A7']={v:'Total Stock Plan',t:'s'};
   ws1['B7']={v:pa,t:'n',z:'#,##0'};
