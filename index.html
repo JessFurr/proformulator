@@ -846,16 +846,23 @@ if (new URLSearchParams(window.location.search).has('fullscreen')) {
 function buildDonut(slices, size, holeRatio) {
   const r = size / 2, cx = r, cy = r, ir = r * holeRatio;
   let paths = '', a = -90;
-  const tot = slices.reduce((s, x) => s + x.pct, 0) || 1;
-  for (const sl of slices) {
-    if (sl.pct <= 0) continue;
-    const deg = (sl.pct / tot) * 360;
-    const a1 = a * Math.PI / 180, a2 = (a + deg) * Math.PI / 180;
-    const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
-    const x2 = cx + r * Math.cos(a2), y2 = cy + r * Math.sin(a2);
-    const lf = deg > 180 ? 1 : 0;
-    paths += `<path d="M${cx.toFixed(1)},${cy.toFixed(1)} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r},0,${lf},1,${x2.toFixed(2)},${y2.toFixed(2)} Z" fill="${sl.color}"/>`;
-    a += deg;
+  const visible = slices.filter(sl => sl.pct > 0);
+  const tot = visible.reduce((s, x) => s + x.pct, 0) || 1;
+  if (visible.length === 1) {
+    // A single slice at 100% has identical start/end points -- one SVG arc command can't
+    // sweep a full 360deg between two coincident points, so the path silently draws nothing.
+    // Draw a plain filled circle instead.
+    paths += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${visible[0].color}"/>`;
+  } else {
+    for (const sl of visible) {
+      const deg = (sl.pct / tot) * 360;
+      const a1 = a * Math.PI / 180, a2 = (a + deg) * Math.PI / 180;
+      const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+      const x2 = cx + r * Math.cos(a2), y2 = cy + r * Math.sin(a2);
+      const lf = deg > 180 ? 1 : 0;
+      paths += `<path d="M${cx.toFixed(1)},${cy.toFixed(1)} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r},0,${lf},1,${x2.toFixed(2)},${y2.toFixed(2)} Z" fill="${sl.color}"/>`;
+      a += deg;
+    }
   }
   paths += `<circle cx="${cx}" cy="${cy}" r="${ir.toFixed(1)}" fill="var(--card)"/>`;
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${paths}</svg>`;
