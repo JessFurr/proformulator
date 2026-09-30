@@ -1567,9 +1567,11 @@ function recalc() {
 
   // SAFEs (if any)
   if(safeResults.length) {
+    const totalSAFEAmt = safeResults.reduce((a,s)=>a+s.amt,0);
     h+=`<div class="card" data-bid="safe-conv"><div class="card-title">SAFE Conversions</div>`;
     h+=safeResults.map(s=>`<div class="dr"><div class="dr-left"><div class="lbl">${x(s.name)||'SAFE'}</div><div class="sub">${s.basis} · ${s.type==='post'?'post-money':'pre-money'}</div></div><div class="dr-val purple" style="text-align:right"><div>${fmtSh(s.safeShares)} shares</div><div style="font-size:10px;color:var(--muted);font-weight:400">@ ${fmtPPS(s.safePPS)}</div><div style="font-size:10px;color:var(--red);font-weight:600;margin-top:1px">${fmtPct(s.safeShares/postFD)} dilution</div></div></div>`).join('');
-    h+=`<div class="dr" style="border-top:1px solid var(--border);margin-top:4px;padding-top:6px"><div class="dr-left"><div class="lbl" style="font-weight:700">Total Dilution from SAFEs</div></div><div class="dr-val" style="color:var(--red);font-weight:700">${fmtPct(totalSAFEShares/postFD)}</div></div>`;
+    h+=`<div class="dr" style="border-top:1px solid var(--border);margin-top:4px;padding-top:6px"><div class="dr-left"><div class="lbl" style="font-weight:700">Total Raised (SAFEs)</div></div><div class="dr-val" style="font-weight:700">$${fmt(totalSAFEAmt)}</div></div>`;
+    h+=`<div class="dr" style="padding-top:2px"><div class="dr-left"><div class="lbl" style="font-weight:700">Total Dilution from SAFEs</div></div><div class="dr-val" style="color:var(--red);font-weight:700">${fmtPct(totalSAFEShares/postFD)}</div></div>`;
     h+=`</div>`;
   }
 
