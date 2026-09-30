@@ -1585,7 +1585,9 @@ function recalc() {
   // Per-SAFE cap check (pre-money only): SAFE $ ÷ Cap should equal SAFE shares ÷ (pre-$ FD + pool increase) —
   // this is the pre-money SAFE's own Company Capitalization basis, which excludes other converting SAFEs (per YC).
   // It will legitimately differ from the "% of FD post SAFE" column once more than one pre-money SAFE is stacked.
-  safeResults.filter(s=>s.type!=='post'&&parseN(s.cap)>0).forEach(s=>{
+  // Only meaningful when the cap actually priced the SAFE — if the discount was cheaper (s.basis says so),
+  // the SAFE's share count was never derived from the cap, so there's nothing to check against it.
+  safeResults.filter(s=>s.type!=='post'&&parseN(s.cap)>0&&!s.basis.startsWith('Discount')).forEach(s=>{
     const cap=parseN(s.cap), denom=preFDBase+poolIncrease;
     const targetPct=s.amt/cap, actualPct=denom>0?s.safeShares/denom:0;
     const diff=targetPct-actualPct; // ROUNDDOWN on shares means diff should be small and non-negative
@@ -1597,7 +1599,8 @@ function recalc() {
   // (preFDBase + pool increase) and the column's denominator (preFDBase + totalSAFEShares) diverge,
   // e.g. when pool increase ≠ total SAFE shares. That's a real signal, not a check bug — the column
   // is the running FD total up to that point (all SAFEs counted together); the cap price is not.
-  safeResults.filter(s=>parseN(s.cap)>0).forEach(s=>{
+  // Same discount gate as above — the cap-vs-column comparison only means something when the cap won.
+  safeResults.filter(s=>parseN(s.cap)>0&&!s.basis.startsWith('Discount')).forEach(s=>{
     const cap=parseN(s.cap);
     const targetPct=s.amt/cap, colPct=preFDDenom>0?s.safeShares/preFDDenom:0;
     const passSafe2 = Math.abs(targetPct-colPct) < 0.0005;
