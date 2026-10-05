@@ -1242,7 +1242,10 @@ function recalc() {
     <div class="dr" style="border-top:1px solid var(--border);margin-top:4px;padding-top:6px">
       <div class="dr-left"><div class="lbl">Wire Calculator</div><div class="sub" style="font-size:9px">enter any investment $ at this PPS</div></div>
       <div style="text-align:right">
-        <input type="text" id="quickWireInput" value="${quickWireAmt}" placeholder="e.g. 100,000" oninput="updateQuickWire(this)" style="width:110px;text-align:right;font-family:inherit;font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--card-bg);color:var(--text)">
+        <div style="display:inline-flex;align-items:center;width:110px;border:1px solid var(--border);border-radius:4px;background:var(--card-bg);overflow:hidden">
+          <span style="padding:3px 0 3px 6px;color:var(--muted);font-size:12px">$</span>
+          <input type="text" id="quickWireInput" value="${quickWireAmt}" placeholder="100,000" oninput="updateQuickWire(this)" style="flex:1;min-width:0;text-align:right;font-family:inherit;font-size:12px;padding:3px 6px;border:none;outline:none;background:transparent;color:var(--text)">
+        </div>
         <div id="quickWireOutput" class="dr-val green" style="margin-top:3px">${quickWireAmt?(()=>{const amt=parseN(quickWireAmt),sh=roundD(amt/pps),wire=roundU2(pps*sh);return `$${fmtDollar(wire)} (${fmtSh(sh)} sh)`;})():'—'}</div>
       </div>
     </div>
