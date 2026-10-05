@@ -1091,7 +1091,10 @@ function recalc() {
       else if(capPPS)    {safePPS=capPPS;basis=`Cap: ${capMath}`;}
       else if(discPPS)   {safePPS=discPPS;basis=`Discount: ${discMath}`;}
       else               {safePPS=pps;basis=`MFN / round PPS (${fmtPPS(pps)})`;}
-      iterResults.push({...s,amt,safePPS,safeShares:roundD(amt/safePPS),basis});
+      // Company Capitalization = the cap's own basis (preFDBase + pool increase, no other SAFEs) —
+      // only meaningful when there's a cap to divide into.
+      const capCapLine=cap>0?`${[`${fmtSh(preFDBase)} pre-money FD shares`].concat(poolIncrease>0?[`${fmtSh(poolIncrease)} new pool shares`]:[]).join(' + ')} = ${fmtSh(capDenom)} shares`:null;
+      iterResults.push({...s,amt,safePPS,safeShares:roundD(amt/safePPS),basis,capCapLine});
     }
     const preSAFEShares=iterResults.reduce((a,b)=>a+b.safeShares,0);
 
@@ -1119,6 +1122,11 @@ function recalc() {
         if(Math.abs(newD-iterD)<0.5){iterD=newD;break;}
         iterD=newD;
       }
+      // Company Capitalization = pre-money FD + any pre-money SAFEs already converted + all post-money
+      // SAFE shares converting this round (including this one) — the fixed-point result above, broken
+      // back out into its parts for display. Same breakdown for every post-money SAFE this round.
+      const postTotalShares=iterD-preFDBase-preSAFEShares;
+      const capCapLinePost=`${[`${fmtSh(preFDBase)} pre-money FD shares`].concat(preSAFEShares>0?[`${fmtSh(preSAFEShares)} pre-money SAFE shares`]:[]).concat(postTotalShares>0?[`${fmtSh(postTotalShares)} post-money SAFE shares`]:[]).join(' + ')} = ${fmtSh(iterD)} shares`;
       for(const s of postValid){
         const amt=parseN(s.amount),cap=parseN(s.cap),disc=parseFloat(s.discount)||0;
         let safePPS=cap>0?round4(cap/iterD):pps,basis=cap>0?`Post-money cap: $${fmt(cap)} ÷ ${fmtSh(iterD)} shares = ${fmtPPS(safePPS)}`:`Round PPS (${fmtPPS(pps)})`;
@@ -1128,7 +1136,7 @@ function recalc() {
           if(dp<safePPS){basis=cap>0?`${discMath} (beats cap ${fmtPPS(safePPS)})`:discMath;safePPS=dp;}
           else if(cap>0){basis=`Post-money cap wins: $${fmt(cap)} ÷ ${fmtSh(iterD)} = ${fmtPPS(safePPS)} (discount would be ${fmtPPS(dp)})`;}
         }
-        iterResults.push({...s,amt,safePPS,safeShares:roundD(amt/safePPS),basis});
+        iterResults.push({...s,amt,safePPS,safeShares:roundD(amt/safePPS),basis,capCapLine:cap>0?capCapLinePost:null});
       }
     }
     const newTotalSAFE=iterResults.reduce((a,b)=>a+b.safeShares,0);
@@ -1569,7 +1577,7 @@ function recalc() {
   if(safeResults.length) {
     const totalSAFEAmt = safeResults.reduce((a,s)=>a+s.amt,0);
     h+=`<div class="card" data-bid="safe-conv"><div class="card-title">SAFE Conversions</div>`;
-    h+=safeResults.map(s=>`<div class="dr"><div class="dr-left"><div class="lbl">${x(s.name)||'SAFE'}</div><div class="sub">${s.basis} · ${s.type==='post'?'post-money':'pre-money'}</div></div><div class="dr-val purple" style="text-align:right"><div>${fmtSh(s.safeShares)} shares</div><div style="font-size:10px;color:var(--muted);font-weight:400">@ ${fmtPPS(s.safePPS)}</div><div style="font-size:10px;color:var(--red);font-weight:600;margin-top:1px">${fmtPct(s.safeShares/postFD)} dilution</div></div></div>`).join('');
+    h+=safeResults.map(s=>`<div class="dr"><div class="dr-left"><div class="lbl">${x(s.name)||'SAFE'}</div><div class="sub">${s.basis} · ${s.type==='post'?'post-money':'pre-money'}</div>${s.capCapLine?`<div class="sub" style="margin-top:2px"><span style="font-weight:700">Company Capitalization:</span> ${s.capCapLine}</div>`:''}</div><div class="dr-val purple" style="text-align:right"><div>${fmtSh(s.safeShares)} shares</div><div style="font-size:10px;color:var(--muted);font-weight:400">@ ${fmtPPS(s.safePPS)}</div><div style="font-size:10px;color:var(--red);font-weight:600;margin-top:1px">${fmtPct(s.safeShares/postFD)} dilution</div></div></div>`).join('');
     h+=`<div class="dr" style="border-top:1px solid var(--border);margin-top:4px;padding-top:6px"><div class="dr-left"><div class="lbl" style="font-weight:700">Total Raised (SAFEs)</div></div><div class="dr-val" style="font-weight:700">$${fmt(totalSAFEAmt)}</div></div>`;
     h+=`<div class="dr" style="padding-top:2px"><div class="dr-left"><div class="lbl" style="font-weight:700">Total Dilution from SAFEs</div></div><div class="dr-val" style="color:var(--red);font-weight:700">${fmtPct(totalSAFEShares/postFD)}</div></div>`;
     h+=`</div>`;
