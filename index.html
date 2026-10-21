@@ -188,6 +188,19 @@ body.view-dil .header{padding-left:18px!important}
 .dil-row.gov .val{color:#ec058c;font-size:18px}
 .dil-note{font-size:10.5px;color:var(--muted);line-height:1.6;margin-top:12px}
 @media(max-width:640px){.dil-grid{grid-template-columns:1fr}.header{flex-wrap:wrap;height:auto}}
+.dil-stack .safe-item{background:#fff}
+.dil-stack .dil-grid{grid-template-columns:1fr 1fr 1fr}
+.dil-shared{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px;margin-bottom:14px;align-items:end}
+.dil-shared .field{margin:0}
+.dil-tbl{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums;margin-top:6px}
+.dil-tbl th{font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);text-align:right;padding:6px 6px;border-bottom:1px solid var(--border-strong)}
+.dil-tbl th:first-child,.dil-tbl td:first-child{text-align:left}
+.dil-tbl td{text-align:right;padding:7px 6px;border-bottom:1px solid var(--border)}
+.dil-tbl td.gov{font-weight:700;color:#ec058c}
+.dil-tbl td .sub{font-size:10px;color:var(--muted);font-weight:400}
+.dil-tbl tr.tot td{font-weight:700;border-top:1.5px solid var(--border-strong);border-bottom:none}
+.dil-tbl tr.ret td{color:var(--muted);border-bottom:none}
+@media(max-width:640px){.dil-stack .dil-grid,.dil-shared{grid-template-columns:1fr}}
 /* ── PROJECT NAME ── */
 .project-name{font-size:14px;font-weight:600;color:rgba(255,255,255,.75);border:none;outline:none;background:transparent;border-bottom:1px solid transparent;padding:2px 6px;font-family:'Inter',sans-serif;min-width:100px;max-width:220px;transition:all .15s}
 .project-name:focus{border-bottom-color:rgba(255,255,255,.4);background:rgba(255,255,255,.08);border-radius:4px 4px 0 0;color:#fff}
@@ -868,22 +881,18 @@ html.tq-print-prep .sky-bg{background:#fff!important;background-image:none!impor
 <div id="dilView">
   <div class="dil-wrap">
     <div class="dil-h">SAFE DILUTION</div>
-    <div class="dil-intro">Quick math on a single SAFE. Fill in a valuation cap, a discount, or both. The calculator runs whichever formulas apply and shows which one governs.</div>
+    <div class="dil-intro">Quick math on one SAFE or a stack. Fill in a valuation cap, a discount, or both for each SAFE. The calculator runs whichever formulas apply and shows which one governs.</div>
     <div class="card dil-card">
       <div class="dil-type">
         <button class="stype active" id="dilTypePost" onclick="setDilType('post')">Post-Money SAFE</button>
         <button class="stype" id="dilTypePre" onclick="setDilType('pre')">Pre-Money SAFE</button>
       </div>
-      <div class="dil-grid">
-        <div class="field"><label>Amount raised</label>
-          <div class="iw"><span class="ip">$</span><input type="text" inputmode="numeric" id="dilAmt" placeholder="500,000" oninput="dilNum(this)"></div></div>
-        <div class="field"><label>Valuation cap</label>
-          <div class="iw"><span class="ip">$</span><input type="text" inputmode="numeric" id="dilCap" placeholder="5,000,000" oninput="dilNum(this)"></div></div>
+      <div class="dil-shared">
         <div class="field"><label>Projected pre-money <span class="opt">(next priced round; needed for discount)</span></label>
           <div class="iw"><span class="ip">$</span><input type="text" inputmode="numeric" id="dilPre" placeholder="8,000,000" oninput="dilNum(this)"></div></div>
-        <div class="field"><label>Discount <span class="opt">(e.g. 20 = 80% discount rate)</span></label>
-          <div class="iw"><span class="ip">%</span><input type="number" id="dilDisc" min="0" max="99" step="any" placeholder="20" oninput="calcDil()"></div></div>
       </div>
+      <div class="dil-stack" id="dilStack"></div>
+      <button class="add-btn" onclick="addDilSafe()">+ Add SAFE</button>
       <div class="dil-res" id="dilResults"></div>
     </div>
     <div class="dil-note" id="dilNote"></div>
@@ -2693,10 +2702,11 @@ document.addEventListener('DOMContentLoaded',()=>{
 })();
 
 // ─── SAFE DILUTION VIEW ──────────────────────────────────────────────────────
-// Standalone single-SAFE calculator. Dilution is measured against the company's
-// capitalization immediately before the new money in the priced round comes in.
+// Standalone SAFE calculator (one SAFE or a stack). Dilution is measured against the
+// company's capitalization immediately before the new money in the priced round comes in.
 const DIL_LS = 'lawgorithm-proforma-dil-v1';
 let dilType = 'post';
+let dilSafes = [], dilCounter = 0;
 function setView(v) {
   document.body.classList.toggle('view-dil', v === 'dil');
   document.getElementById('viewTabPF').classList.toggle('active', v !== 'dil');
@@ -2709,70 +2719,119 @@ function setDilType(t) {
   document.getElementById('dilTypePre').classList.toggle('active', t === 'pre');
   calcDil();
 }
-function dilNum(el) {
+function fmtCommas(el) {
   const end = el.selectionEnd, old = el.value.length;
   const raw = el.value.replace(/[^\d]/g,'');
   el.value = raw ? parseInt(raw,10).toLocaleString('en-US') : '';
   const pos = Math.max(0, end + (el.value.length - old));
   try { el.setSelectionRange(pos,pos); } catch(e){}
+}
+function dilNum(el) { fmtCommas(el); calcDil(); }
+function addDilSafe(d) {
+  dilSafes.push({ id: ++dilCounter, name: d?.name || '', amt: d?.amt || '', cap: d?.cap || '', disc: d?.disc || '' });
+  renderDilSafes(); calcDil();
+}
+function removeDilSafe(id) { dilSafes = dilSafes.filter(d => d.id !== id); renderDilSafes(); calcDil(); }
+function updDilSafe(el, id, f) {
+  if (f === 'amt' || f === 'cap') fmtCommas(el);
+  const d = dilSafes.find(d => d.id === id); if (d) d[f] = el.value;
   calcDil();
 }
+function renderDilSafes() {
+  const multi = dilSafes.length > 1;
+  document.getElementById('dilStack').innerHTML = dilSafes.map((d, i) => `
+    <div class="safe-item">
+      <div class="safe-item-head">
+        <input class="safe-name" placeholder="SAFE ${i + 1}" value="${x(d.name)}" oninput="updDilSafe(this,${d.id},'name')">
+        ${multi ? `<button class="item-rm" onclick="removeDilSafe(${d.id})" title="Remove SAFE">×</button>` : ''}
+      </div>
+      <div class="dil-grid">
+        <div class="field"><label>Amount raised</label>
+          <div class="iw"><span class="ip">$</span><input type="text" inputmode="numeric" placeholder="500,000" value="${x(d.amt)}" oninput="updDilSafe(this,${d.id},'amt')"></div></div>
+        <div class="field"><label>Valuation cap</label>
+          <div class="iw"><span class="ip">$</span><input type="text" inputmode="numeric" placeholder="5,000,000" value="${x(d.cap)}" oninput="updDilSafe(this,${d.id},'cap')"></div></div>
+        <div class="field"><label>Discount <span class="opt">(20 = 80% rate)</span></label>
+          <div class="iw"><span class="ip">%</span><input type="number" min="0" max="99" step="any" placeholder="20" value="${x(d.disc)}" oninput="updDilSafe(this,${d.id},'disc')"></div></div>
+      </div>
+    </div>`).join('');
+}
 function calcDil() {
-  const amt = pf('dilAmt'), cap = pf('dilCap'), pre = pf('dilPre');
-  const discRaw = document.getElementById('dilDisc').value;
-  const disc = parseFloat(discRaw);
-  const hasDisc = discRaw !== '' && disc > 0 && disc < 100;
+  const pre = pf('dilPre');
   const usd = n => '$' + Math.round(n).toLocaleString('en-US');
   const pct = n => (n * 100).toFixed(2) + '%';
+  const rate = disc => (100 - disc).toFixed(2).replace(/\.?0+$/,'') + '%';
   const dash = '<span style="color:var(--muted)">—</span>';
-  // Effective valuation the SAFE converts at, and the resulting ownership.
-  // Post-money: ownership = amount ÷ post-money cap. Pre-money: SAFE shares sit on top of the pre-money cap.
-  let capR = null, discR = null;
-  if (amt > 0 && cap > 0) {
-    capR = dilType === 'post'
-      ? { val: cap, own: amt / cap, f: `${usd(amt)} ÷ ${usd(cap)} post-money cap` }
-      : { val: cap, own: amt / (cap + amt), f: `${usd(amt)} ÷ (${usd(cap)} cap + ${usd(amt)})` };
+  const pre_ = dilType === 'pre';
+  // For each SAFE, x = conversion shares as a multiple of the base capitalization.
+  // Post-money: base already includes the SAFEs, so x is the ownership itself.
+  // Pre-money: base excludes the SAFEs, so ownership = x ÷ (1 + Σx) across the whole stack.
+  const rows = dilSafes.map((d, i) => {
+    const amt = parseN(d.amt), cap = parseN(d.cap), disc = parseFloat(d.disc);
+    const hasDisc = d.disc !== '' && disc > 0 && disc < 100;
+    const capX = amt > 0 && cap > 0 ? amt / cap : null;
+    const effVal = pre > 0 && hasDisc ? pre * (1 - disc / 100) : 0;
+    const discX = amt > 0 && effVal > 0 ? amt / effVal : null;
+    // The SAFE converts at whichever method yields more shares.
+    let govX = null, govBy = '';
+    if (capX !== null && discX !== null) { govX = Math.max(capX, discX); govBy = capX >= discX ? 'Cap' : 'Discount'; }
+    else if (capX !== null) { govX = capX; govBy = 'Cap only'; }
+    else if (discX !== null) { govX = discX; govBy = 'Discount only'; }
+    return { name: d.name || `SAFE ${i + 1}`, amt, cap, disc, hasDisc, effVal, capX, discX, govX, govBy, needsPre: amt > 0 && hasDisc && !pre };
+  });
+  const sumX = rows.reduce((t, r) => t + (r.govX || 0), 0);
+  // Ownership for a given x. In pre-money mode the denominator carries the full stack's governing shares.
+  const own = (xv, r) => pre_ ? xv / (1 + sumX - (r.govX || 0) + xv) : xv;
+  const res = document.getElementById('dilResults');
+  if (rows.length === 1) {
+    const r = rows[0];
+    const line = (lbl, xv, f, val, cls) => `<div class="dil-row ${cls||''}">
+        <div><div class="lbl">${lbl}</div>${xv !== null ? `<div class="sub">${f}</div>` : ''}</div>
+        <div class="val">${xv !== null ? pct(own(xv, r)) : dash}${xv !== null && val ? `<div class="sub">at ${usd(val)} valuation</div>` : ''}</div>
+      </div>`;
+    const capF = pre_ ? `${usd(r.amt)} ÷ (${usd(r.cap)} cap + ${usd(r.amt)})` : `${usd(r.amt)} ÷ ${usd(r.cap)} post-money cap`;
+    const discF = pre_ ? `${usd(r.amt)} ÷ (${usd(pre)} × ${rate(r.disc)} + ${usd(r.amt)})` : `${usd(r.amt)} ÷ (${usd(pre)} × ${rate(r.disc)})`;
+    res.innerHTML =
+      line('Cap-based dilution', r.capX, capF, r.cap) +
+      line('Discount-based dilution' + (r.needsPre ? ' <span style="font-size:10.5px;color:var(--muted)">(enter a projected pre-money)</span>' : ''), r.discX, discF, r.effVal) +
+      `<div class="dil-row gov">
+        <div><div class="lbl">Governing dilution</div>${r.govX !== null ? `<div class="sub">${r.govBy === 'Cap' ? 'Cap governs' : r.govBy === 'Discount' ? 'Discount governs' : r.govBy}</div>` : ''}</div>
+        <div class="val">${r.govX !== null ? pct(own(r.govX, r)) : '—'}</div>
+      </div>`;
+  } else {
+    const totAmt = rows.reduce((t, r) => t + r.amt, 0);
+    const totOwn = pre_ ? sumX / (1 + sumX) : sumX;
+    const cell = (xv, r, val) => xv !== null ? `${pct(own(xv, r))}<div class="sub">at ${usd(val)}</div>` : dash;
+    res.innerHTML = `<table class="dil-tbl">
+      <thead><tr><th>SAFE</th><th>Amount</th><th>Cap-based</th><th>Discount-based</th><th>Governing</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${x(r.name)}</td>
+        <td>${r.amt ? usd(r.amt) : dash}</td>
+        <td>${cell(r.capX, r, r.cap)}</td>
+        <td>${r.needsPre ? '<span class="sub">needs pre-money</span>' : cell(r.discX, r, r.effVal)}</td>
+        <td class="gov">${r.govX !== null ? `${pct(own(r.govX, r))}<div class="sub">${r.govBy}</div>` : dash}</td>
+      </tr>`).join('')}
+      <tr class="tot"><td>Total SAFEs</td><td>${usd(totAmt)}</td><td></td><td></td><td class="gov">${pct(totOwn)}</td></tr>
+      <tr class="ret"><td>Existing holders retain</td><td></td><td></td><td></td><td>${pct(1 - totOwn)}</td></tr>
+      </tbody></table>`;
   }
-  if (amt > 0 && pre > 0 && hasDisc) {
-    const effVal = pre * (1 - disc / 100);
-    discR = dilType === 'post'
-      ? { val: effVal, own: amt / effVal, f: `${usd(amt)} ÷ (${usd(pre)} × ${(100 - disc).toFixed(2).replace(/\.?0+$/,'')}%)` }
-      : { val: effVal, own: amt / (effVal + amt), f: `${usd(amt)} ÷ (${usd(pre)} × ${(100 - disc).toFixed(2).replace(/\.?0+$/,'')}% + ${usd(amt)})` };
-  }
-  // The SAFE converts at whichever method yields more shares, i.e. the higher dilution.
-  let gov = null, govLbl = '';
-  if (capR && discR) { gov = capR.own >= discR.own ? capR : discR; govLbl = gov === capR ? 'Cap governs' : 'Discount governs'; }
-  else if (capR) { gov = capR; govLbl = 'Cap only'; }
-  else if (discR) { gov = discR; govLbl = 'Discount only'; }
-  const row = (lbl, r, extraCls) => `<div class="dil-row ${extraCls||''}">
-      <div><div class="lbl">${lbl}</div>${r ? `<div class="sub">${r.f}</div>` : ''}</div>
-      <div class="val">${r ? pct(r.own) : dash}${r ? `<div class="sub">at ${usd(r.val)} valuation</div>` : ''}</div>
-    </div>`;
-  const capMissing = amt > 0 && !cap ? 'enter a cap' : '';
-  const discMissing = amt > 0 && hasDisc && !pre ? 'enter a projected pre-money' : '';
-  document.getElementById('dilResults').innerHTML =
-    row('Cap-based dilution', capR) +
-    row('Discount-based dilution' + (discMissing ? ` <span style="font-size:10.5px;color:var(--muted)">(${discMissing})</span>` : ''), discR) +
-    `<div class="dil-row gov">
-      <div><div class="lbl">Governing dilution</div>${gov ? `<div class="sub">${govLbl}</div>` : ''}</div>
-      <div class="val">${gov ? pct(gov.own) : '—'}</div>
-    </div>`;
-  document.getElementById('dilNote').innerHTML = dilType === 'post'
-    ? 'Post-money SAFE: ownership is measured against company capitalization including all converting SAFEs, before the new round’s money comes in. The discount math assumes the priced round’s pre-money also includes the SAFE shares. Additional post-money SAFEs dilute the founders and leave this SAFE’s percentage unchanged.'
-    : 'Pre-money SAFE: conversion shares are added on top of the pre-money capitalization, so the SAFE holder’s percentage is amount ÷ (valuation + amount). Other SAFEs, the pool top-up and the new money will dilute this percentage further. Use the Pro Forma tab for the full stack.';
-  try { localStorage.setItem(DIL_LS, JSON.stringify({ type: dilType, amt: document.getElementById('dilAmt').value, cap: document.getElementById('dilCap').value, pre: document.getElementById('dilPre').value, disc: discRaw })); } catch(e){}
+  document.getElementById('dilNote').innerHTML = pre_
+    ? 'Pre-money SAFE: conversion shares are added on top of the pre-money capitalization, so each SAFE holder’s percentage is diluted by every other SAFE in the stack. The discount math assumes the round price is set on the pre-money capitalization excluding SAFE shares. The pool top-up and the new money will dilute these percentages further. Use the Pro Forma tab for the full round.'
+    : 'Post-money SAFE: ownership is measured against company capitalization including all converting SAFEs, before the new round’s money comes in. The discount math assumes the priced round’s pre-money also includes the SAFE shares. Additional post-money SAFEs dilute the founders and leave each SAFE’s percentage unchanged.';
+  try { localStorage.setItem(DIL_LS, JSON.stringify({ type: dilType, pre: document.getElementById('dilPre').value, safes: dilSafes.map(({name, amt, cap, disc}) => ({name, amt, cap, disc})) })); } catch(e){}
 }
 document.addEventListener('DOMContentLoaded', () => {
+  let saved = [];
   try {
     const d = JSON.parse(localStorage.getItem(DIL_LS) || 'null');
     if (d) {
       dilType = d.type === 'pre' ? 'pre' : 'post';
-      document.getElementById('dilAmt').value = d.amt || '';
-      document.getElementById('dilCap').value = d.cap || '';
       document.getElementById('dilPre').value = d.pre || '';
-      document.getElementById('dilDisc').value = d.disc || '';
+      // v1 stored a single SAFE as top-level amt/cap/disc
+      saved = Array.isArray(d.safes) ? d.safes : [{ amt: d.amt, cap: d.cap, disc: d.disc }];
     }
   } catch(e){}
+  (saved.length ? saved : [{}]).forEach(sf => dilSafes.push({ id: ++dilCounter, name: sf.name || '', amt: sf.amt || '', cap: sf.cap || '', disc: sf.disc || '' }));
+  renderDilSafes();
   setDilType(dilType);
   let v = 'pf';
   try { v = localStorage.getItem(DIL_LS + '-view') || 'pf'; } catch(e){}
